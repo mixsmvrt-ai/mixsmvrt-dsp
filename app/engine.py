@@ -5,7 +5,7 @@ import soundfile as sf
 from app.chains import TRACK_CHAINS
 from app.presets import PRESETS
 from app.storage import upload_file_to_s3
-from backend.dsp.vocal_presets import (
+from app.vocal_presets import (
     dancehall,
     trap_dancehall,
     afrobeat,
