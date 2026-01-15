@@ -7,4 +7,4 @@ soundfile
 pyloudnorm
 python-multipart
 boto3
-pedalboard
+pedalboard>=0.9.8
