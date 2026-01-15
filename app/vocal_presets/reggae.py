@@ -2,23 +2,126 @@ from __future__ import annotations
 
 import numpy as np
 import pyloudnorm as pyln
-from pedalboard import (
-    Pedalboard,
-    Gain,
-    HighpassFilter,
-    Compressor,
-    Limiter,
-    NoiseGate,
-    PeakFilter,
-    HighShelfFilter,
-    LowShelfFilter,
-    Saturation,
-    Reverb,
-    Delay,
-)
+from pedalboard import Pedalboard
 
 try:
-    from pedalboard import Deesser
+    from pedalboard import Gain  # type: ignore
+except Exception:
+    class Gain:
+        def __init__(self, gain_db: float = 0.0, **kwargs) -> None:
+            self.gain = gain_db
+
+        def __call__(self, audio, sample_rate):
+            factor = 10.0 ** (self.gain / 20.0)
+            return audio * factor
+
+try:
+    from pedalboard import HighpassFilter  # type: ignore
+except Exception:
+    class HighpassFilter:
+        def __init__(self, cutoff_frequency_hz: float = 80.0, **kwargs) -> None:
+            self.cutoff = cutoff_frequency_hz
+
+        def __call__(self, audio, sample_rate):
+            import numpy as _np
+            rc = 1.0 / (2 * _np.pi * self.cutoff)
+            dt = 1.0 / float(sample_rate)
+            alpha = rc / (rc + dt)
+            out = _np.zeros_like(audio)
+            out[0] = audio[0]
+            for i in range(1, len(audio)):
+                out[i] = alpha * (out[i - 1] + audio[i] - audio[i - 1])
+            return out
+
+try:
+    from pedalboard import Compressor  # type: ignore
+except Exception:
+    class Compressor:
+        def __init__(self, threshold_db: float = -18.0, ratio: float = 2.0, **kwargs) -> None:
+            self.threshold = threshold_db
+            self.ratio = ratio
+
+        def __call__(self, audio, sample_rate):
+            import numpy as _np
+            threshold_lin = 10.0 ** (self.threshold / 20.0)
+            mag = _np.abs(audio)
+            over = _np.maximum(mag - threshold_lin, 0.0)
+            gain = 1.0 / (1.0 + (self.ratio - 1.0) * over)
+            return audio * gain
+
+try:
+    from pedalboard import Limiter  # type: ignore
+except Exception:
+    class Limiter:
+        def __init__(self, threshold_db: float = -1.0, **kwargs) -> None:
+            self.threshold = 10.0 ** (threshold_db / 20.0)
+
+        def __call__(self, audio, sample_rate):
+            import numpy as _np
+            return _np.clip(audio, -self.threshold, self.threshold)
+
+try:
+    from pedalboard import NoiseGate  # type: ignore
+except Exception:
+    class NoiseGate:
+        def __init__(self, threshold_db: float = -60.0, **kwargs) -> None:
+            self.threshold = 10.0 ** (threshold_db / 20.0)
+
+        def __call__(self, audio, sample_rate):
+            import numpy as _np
+            mag = _np.abs(audio)
+            mask = mag >= self.threshold
+            return audio * mask
+
+try:
+    from pedalboard import PeakFilter, HighShelfFilter, LowShelfFilter  # type: ignore
+except Exception:
+    class PeakFilter:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __call__(self, audio, sample_rate):
+            return audio
+
+    class HighShelfFilter(PeakFilter):
+        pass
+
+    class LowShelfFilter(PeakFilter):
+        pass
+
+try:
+    from pedalboard import Saturation  # type: ignore
+except Exception:
+    class Saturation:
+        """Fallback saturation using soft clipping."""
+
+        def __init__(self, drive_db: float = 0.0, **kwargs) -> None:
+            self.drive = drive_db
+
+        def __call__(self, audio, sample_rate):
+            import numpy as _np
+            gain = 10.0 ** (self.drive / 20.0)
+            return _np.tanh(audio * gain)
+
+try:
+    from pedalboard import Reverb, Delay  # type: ignore
+except Exception:
+    class Reverb:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __call__(self, audio, sample_rate):
+            return audio
+
+    class Delay:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __call__(self, audio, sample_rate):
+            return audio
+
+try:
+    from pedalboard import Deesser  # type: ignore
 except Exception:
     class Deesser:
         """Fallback De-Esser using a gentle high-shelf cut as approximation."""
