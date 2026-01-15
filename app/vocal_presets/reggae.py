@@ -9,7 +9,6 @@ from pedalboard import (
     Compressor,
     Limiter,
     NoiseGate,
-    Deesser,
     PeakFilter,
     HighShelfFilter,
     LowShelfFilter,
@@ -17,6 +16,23 @@ from pedalboard import (
     Reverb,
     Delay,
 )
+
+try:
+    from pedalboard import Deesser
+except Exception:
+    class Deesser:
+        """Fallback De-Esser using a gentle high-shelf cut as approximation."""
+
+        def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
+            self.frequency = frequency
+            self.threshold_db = threshold_db
+            self.ratio = ratio
+            self._board = Pedalboard([
+                HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
+            ])
+
+        def __call__(self, audio, sample_rate):
+            return self._board(audio, sample_rate)
 
 from .tuning import apply_pitch_correction
 
