@@ -2,20 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pyloudnorm as pyln
-from pedalboard import (
-    Pedalboard,
-    Gain,  # type: ignore
-    HighpassFilter,  # type: ignore
-    Compressor,  # type: ignore
-    Limiter,  # type: ignore
-    NoiseGate,  # type: ignore
-    PeakFilter,  # type: ignore
-    HighShelfFilter,  # type: ignore
-    LowShelfFilter,  # type: ignore
-    Saturation,  # type: ignore
-    Reverb,  # type: ignore
-    Delay,  # type: ignore
-)
+from pedalboard import Pedalboard
 
 try:
     from pedalboard import Deesser
