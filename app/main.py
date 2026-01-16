@@ -12,7 +12,7 @@ app = FastAPI(title="MixSmvrt DSP Engine")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://your-app.vercel.app",
+        "https://mixsmvrt.netlify.app",
         "https://mixsmvrt-dsp-1.onrender.com",
     ],
     allow_credentials=True,
