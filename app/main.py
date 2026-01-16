@@ -1,11 +1,24 @@
 import json
 
 from fastapi import FastAPI, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.engine import process_audio
 from app.analysis import analyze_audio
 
 app = FastAPI(title="MixSmvrt DSP Engine")
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://your-app.vercel.app",
+        "https://mixsmvrt-dsp-1.onrender.com",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/analyze")
@@ -33,9 +46,8 @@ async def process(
     if reference_profile:
         try:
             parsed = json.loads(reference_profile)
-            # Frontend typically passes the ``preset_overrides`` object.
             overrides_dict = parsed.get("preset_overrides", parsed)
-        except Exception:  # pragma: no cover - defensive parsing
+        except Exception:
             overrides_dict = None
 
     output_path = process_audio(file, track_type, preset, genre, gender, overrides_dict)
