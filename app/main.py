@@ -1,24 +1,13 @@
 import json
+from dataclasses import asdict
 
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, UploadFile, File, Form, Query
 
 from app.engine import process_audio
 from app.analysis import analyze_audio
+from app.preset_registry import list_presets
 
 app = FastAPI(title="MixSmvrt DSP Engine")
-
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://mixsmvrt.vercel.app",
-        "https://mixsmvrt-dsp-1.onrender.com",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 
 @app.post("/analyze")
@@ -46,8 +35,9 @@ async def process(
     if reference_profile:
         try:
             parsed = json.loads(reference_profile)
+            # Frontend typically passes the ``preset_overrides`` object.
             overrides_dict = parsed.get("preset_overrides", parsed)
-        except Exception:
+        except Exception:  # pragma: no cover - defensive parsing
             overrides_dict = None
 
     output_path = process_audio(file, track_type, preset, genre, gender, overrides_dict)
@@ -58,4 +48,25 @@ async def process(
         "preset": preset,
         "genre": genre,
         "gender": gender,
+    }
+
+
+@app.get("/presets")
+async def list_available_presets(kind: str | None = Query(default=None)):
+    """Return the catalog of presets known to the DSP engine.
+
+    Optional query parameter ``kind`` can be one of ``vocal``, ``mix`` or
+    ``master`` to filter the list. The response is structured for direct
+    consumption by the studio or admin UI.
+    """
+
+    normalized: str | None
+    if kind in {"vocal", "mix", "master"}:
+        normalized = kind
+    else:
+        normalized = None
+
+    presets = list_presets(kind=normalized)  # type: ignore[arg-type]
+    return {
+        "presets": [asdict(p) for p in presets],
     }
