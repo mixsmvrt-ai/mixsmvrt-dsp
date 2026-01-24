@@ -60,6 +60,35 @@ def _merge_preset_with_overrides(base: dict, overrides: dict | None) -> dict:
     return merged
 
 
+def _apply_beat_safe_overrides(preset: dict) -> dict:
+    """Return a beat-safe version of a preset.
+
+    This lightly reduces compression and saturation to better preserve
+    dynamics on stereo beats and instrumentals while keeping the
+    original character as much as possible.
+    """
+
+    safe = {k: dict(v) for k, v in preset.items()}
+    for processor_id, params in safe.items():
+        ratio = params.get("ratio")
+        if isinstance(ratio, (int, float)):
+            params["ratio"] = max(1.0, min(ratio, 3.0))
+
+        drive = params.get("drive")
+        if isinstance(drive, (int, float)):
+            params["drive"] = drive * 0.5
+
+        saturation = params.get("saturation")
+        if isinstance(saturation, (int, float)):
+            params["saturation"] = saturation * 0.6
+
+        makeup = params.get("makeup_gain")
+        if isinstance(makeup, (int, float)):
+            params["makeup_gain"] = makeup * 0.5
+
+    return safe
+
+
 def process_audio(
     file,
     track_type: str,
@@ -67,6 +96,7 @@ def process_audio(
     genre: str | None = None,
     gender: str | None = None,
     reference_overrides: dict | None = None,
+    target: str | None = None,
 ) -> str:
     """Run a simple offline DSP chain over the uploaded audio.
 
@@ -122,6 +152,10 @@ def process_audio(
             base_preset,
             (reference_overrides or {}).get(preset_name) if isinstance(reference_overrides, dict) else None,
         )
+
+        # Apply beat-safe overrides for beats and instrumentals when requested.
+        if target and target.lower() == "beat":
+            preset = _apply_beat_safe_overrides(preset)
         processed = audio.copy()
         for processor in chain:
             params = preset.get(processor.__name__, {})

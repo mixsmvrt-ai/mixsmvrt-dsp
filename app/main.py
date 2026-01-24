@@ -36,6 +36,7 @@ async def process(
     preset: str = Form("clean_vocal"),
     genre: str | None = Form(None),
     reference_profile: str | None = Form(None),
+    target: str | None = Form(None),
 ):
     """Process an uploaded audio file with the given track type + preset.
 
@@ -53,7 +54,15 @@ async def process(
         except Exception:  # pragma: no cover - defensive parsing
             overrides_dict = None
 
-    output_path = process_audio(file, track_type, preset, genre, gender, overrides_dict)
+    output_path = process_audio(
+        file,
+        track_type,
+        preset,
+        genre,
+        gender,
+        overrides_dict,
+        target,
+    )
     return {
         "status": "processed",
         "output_file": output_path,
