@@ -2,12 +2,25 @@ import json
 from dataclasses import asdict
 
 from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.engine import process_audio
 from app.analysis import analyze_audio
 from app.preset_registry import list_presets
 
 app = FastAPI(title="MixSmvrt DSP Engine")
+
+# Allow the Vercel studio and local development to call this DSP service
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://mixsmvrt.vercel.app",
+        "http://localhost:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.post("/analyze")
