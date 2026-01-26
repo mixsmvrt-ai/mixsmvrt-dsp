@@ -5,6 +5,7 @@ import soundfile as sf
 from app.chains import TRACK_CHAINS
 from app.presets import PRESETS
 from app.storage import upload_file_to_s3
+from app.throw_fx import apply_throw_fx_to_vocal
 from app.vocal_presets import (
     dancehall,
     trap_dancehall,
@@ -97,6 +98,7 @@ def process_audio(
     gender: str | None = None,
     reference_overrides: dict | None = None,
     target: str | None = None,
+    throw_fx_mode: str | None = None,
 ) -> str:
     """Run a simple offline DSP chain over the uploaded audio.
 
@@ -160,6 +162,11 @@ def process_audio(
         for processor in chain:
             params = preset.get(processor.__name__, {})
             processed = processor(processed, sr, params)
+
+    # Optional throw FX for vocals – applied after the core vocal chain so
+    # throws sit around the already-shaped vocal.
+    if track_type == "vocal" and throw_fx_mode:
+        processed = apply_throw_fx_to_vocal(processed, sr, throw_fx_mode)
 
     out_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
     sf.write(out_file.name, processed, sr)
