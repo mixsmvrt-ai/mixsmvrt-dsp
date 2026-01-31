@@ -209,7 +209,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             gain_db=-1.0,
         ),
         PeakFilter(
-            center_frequency_hz=3000.0,
+            cutoff_frequency_hz=3000.0,
             gain_db=4.0,
             q=1.1,
         ),
