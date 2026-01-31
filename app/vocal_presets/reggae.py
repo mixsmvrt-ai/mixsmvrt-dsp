@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# pyright: strict=false, reportGeneralTypeIssues=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
+
 import numpy as np
 import pyloudnorm as pyln
 from pedalboard import Pedalboard
@@ -203,7 +205,6 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             ratio=2.0,
             attack_ms=12.0,
             release_ms=180.0,
-            makeup_gain_db=1.5,
         ),
         LowShelfFilter(
             cutoff_frequency_hz=180.0,

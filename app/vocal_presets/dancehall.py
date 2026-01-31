@@ -224,7 +224,6 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             ratio=4.5,
             attack_ms=4.0,
             release_ms=80.0,
-            makeup_gain_db=2.0,
         ),
         # 6) Tone‑shaping EQ
         LowShelfFilter(

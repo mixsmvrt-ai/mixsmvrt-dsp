@@ -203,7 +203,6 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             ratio=5.5,
             attack_ms=4.0,
             release_ms=80.0,
-            makeup_gain_db=4.0,
         ),
         LowShelfFilter(
             cutoff_frequency_hz=200.0,
