@@ -1,7 +1,7 @@
 import json
 from dataclasses import asdict
 
-from fastapi import FastAPI, UploadFile, File, Form, Query
+from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.engine import process_audio
@@ -66,16 +66,21 @@ async def process(
         except Exception:  # pragma: no cover - defensive parsing
             overrides_dict = None
 
-    output_path = process_audio(
-        file,
-        track_type,
-        preset,
-        genre,
-        gender,
-        overrides_dict,
-        target,
-        throw_fx_mode=throw_fx_mode,
-    )
+    try:
+        output_path = process_audio(
+            file,
+            track_type,
+            preset,
+            genre,
+            gender,
+            overrides_dict,
+            target,
+            throw_fx_mode=throw_fx_mode,
+        )
+    except Exception as exc:  # pragma: no cover - defensive, logs via HTTP detail
+        # Surface a more descriptive error than the default "Internal Server Error"
+        # so upstream services and the studio UI can see what went wrong.
+        raise HTTPException(status_code=500, detail=f"DSP processing failed: {exc}") from exc
     return {
         "status": "processed",
         "output_file": output_path,
