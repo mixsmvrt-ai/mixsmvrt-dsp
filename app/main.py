@@ -23,6 +23,17 @@ app.add_middleware(
 )
 
 
+@app.get("/health")
+async def health():
+    """Lightweight health endpoint for uptime checks.
+
+    Returns a static JSON payload so Render and external monitors can verify
+    that the DSP service is up without exercising the full processing stack.
+    """
+
+    return {"status": "ok"}
+
+
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     """Return analysis stats and reference-based preset overrides."""
