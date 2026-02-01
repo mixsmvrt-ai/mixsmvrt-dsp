@@ -207,7 +207,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     compressor_threshold = -18.0 if not is_female else -20.0
     highshelf_gain = 1.5 if not is_female else 2.0
 
-    board = Pedalboard([
+    plugins = [
         # 2) High‑pass filter – slightly higher for female voices.
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
         # 3) Gentle noise gate to clean breaths/room between phrases.
@@ -260,7 +260,11 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             release_ms=100.0,
         ),
         Gain(gain_db=-0.5),
-    ])
+    ]
+
+    # Filter out any local fallback processors that are not real pedalboard plugins
+    plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
+    board = Pedalboard(plugins)
 
     processed = board(pb_input, sr)
     return _restore_shape(processed, audio)

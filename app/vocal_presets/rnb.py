@@ -190,7 +190,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     deesser_freq = 6500.0 if not is_female else 7000.0
     highshelf_gain = 2.0 if not is_female else 2.5
 
-    board = Pedalboard([
+    plugins = [
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
         NoiseGate(threshold_db=-52.0, ratio=1.6, release_ms=180.0),
         Deesser(
@@ -235,8 +235,10 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             release_ms=130.0,
         ),
         Gain(gain_db=-0.5),
-    ])
+    ]
 
+    plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
+    board = Pedalboard(plugins)
     processed = board(pb_input, sr)
     return _restore_shape(processed, audio)
 
