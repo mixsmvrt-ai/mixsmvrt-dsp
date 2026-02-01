@@ -170,7 +170,7 @@ def process_audio(
             vocal_processor = VOCAL_GENRE_PROCESSORS.get(combined)
 
         if vocal_processor is None:
-            # Fallback to gender-agnostic preset.
+            # Fallback to gender-agnostic preset, including bg/adlib variants.
             vocal_processor = VOCAL_GENRE_PROCESSORS.get(base_key)
         if vocal_processor is not None:
             # Genre-aware, pedalboard-centric vocal chains stay in charge
