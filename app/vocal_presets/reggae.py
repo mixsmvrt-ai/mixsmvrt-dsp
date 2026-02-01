@@ -188,55 +188,55 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
 
     is_female = (gender or "male").lower() == "female"
 
-    highpass_cutoff = 70.0 if not is_female else 85.0
-    deesser_freq = 6500.0 if not is_female else 7000.0
-    highshelf_gain = 0.5 if not is_female else 1.0
+    highpass_cutoff = 72.0 if not is_female else 88.0
+    deesser_freq = 6600.0 if not is_female else 7100.0
+    highshelf_gain = 1.2 if not is_female else 1.7
 
     plugins = [
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
-        NoiseGate(threshold_db=-55.0, ratio=1.5, release_ms=200.0),
+        NoiseGate(threshold_db=-56.0, ratio=1.6, release_ms=210.0),
         Deesser(
             frequency=deesser_freq,
             threshold_db=-32.0,
             ratio=2.0,
         ),
         Compressor(
-            threshold_db=-18.0,
-            ratio=2.0,
-            attack_ms=12.0,
-            release_ms=180.0,
+            threshold_db=-19.0,
+            ratio=2.2,
+            attack_ms=14.0,
+            release_ms=190.0,
         ),
         LowShelfFilter(
             cutoff_frequency_hz=180.0,
-            gain_db=1.5,
+            gain_db=2.0,
         ),
         PeakFilter(
-            cutoff_frequency_hz=1500.0,
-            gain_db=1.0,
-            q=0.8,
+            cutoff_frequency_hz=1600.0,
+            gain_db=1.5,
+            q=0.85,
         ),
         HighShelfFilter(
-            cutoff_frequency_hz=9000.0,
+            cutoff_frequency_hz=9200.0,
             gain_db=highshelf_gain,
         ),
-        Saturation(drive_db=3.0),
+        Saturation(drive_db=3.5),
         Reverb(
-            room_size=0.35,
-            damping=0.55,
-            wet_level=0.22,
-            dry_level=0.78,
+            room_size=0.37,
+            damping=0.56,
+            wet_level=0.25,
+            dry_level=0.75,
             width=1.0,
         ),
         Delay(
-            delay_seconds=0.34,
-            feedback=0.28,
-            mix=0.22,
+            delay_seconds=0.35,
+            feedback=0.3,
+            mix=0.24,
         ),
         Limiter(
-            threshold_db=-2.0,
-            release_ms=160.0,
+            threshold_db=-1.8,
+            release_ms=170.0,
         ),
-        Gain(gain_db=-0.5),
+        Gain(gain_db=-0.7),
     ]
 
     plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]

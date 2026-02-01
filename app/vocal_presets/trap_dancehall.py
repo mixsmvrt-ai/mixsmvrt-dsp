@@ -185,57 +185,60 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
 
     is_female = (gender or "male").lower() == "female"
 
-    highpass_cutoff = 110.0 if not is_female else 125.0
-    deesser_freq = 7200.0 if not is_female else 7600.0
-    deesser_threshold = -30.0 if not is_female else -32.0
-    highshelf_gain = 2.0 if not is_female else 2.5
+    highpass_cutoff = 115.0 if not is_female else 130.0
+    deesser_freq = 7300.0 if not is_female else 7800.0
+    deesser_threshold = -31.0 if not is_female else -33.0
+    highshelf_gain = 2.5 if not is_female else 3.0
 
-    board = Pedalboard([
+    plugins = [
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
-        NoiseGate(threshold_db=-42.0, ratio=2.5, release_ms=140.0),
+        NoiseGate(threshold_db=-44.0, ratio=2.6, release_ms=140.0),
         Deesser(
             frequency=deesser_freq,
             threshold_db=deesser_threshold,
-            ratio=4.5,
+            ratio=4.8,
         ),
         Compressor(
-            threshold_db=-20.0,
-            ratio=5.0,
+            threshold_db=-21.0,
+            ratio=5.2,
             attack_ms=3.0,
-            release_ms=70.0,
+            release_ms=75.0,
         ),
         LowShelfFilter(
             cutoff_frequency_hz=200.0,
-            gain_db=-2.0,
+            gain_db=-2.5,
         ),
         PeakFilter(
-            cutoff_frequency_hz=3200.0,
-            gain_db=4.0,
-            q=1.0,
+            cutoff_frequency_hz=3300.0,
+            gain_db=4.5,
+            q=0.95,
         ),
         HighShelfFilter(
-            cutoff_frequency_hz=10000.0,
+            cutoff_frequency_hz=10500.0,
             gain_db=highshelf_gain,
         ),
-        Saturation(drive_db=7.5),
+        Saturation(drive_db=8.0),
         Reverb(
-            room_size=0.22,
-            damping=0.4,
-            wet_level=0.17,
-            dry_level=0.83,
+            room_size=0.24,
+            damping=0.42,
+            wet_level=0.2,
+            dry_level=0.8,
             width=1.0,
         ),
         Delay(
-            delay_seconds=0.24,
-            feedback=0.22,
-            mix=0.17,
+            delay_seconds=0.25,
+            feedback=0.24,
+            mix=0.2,
         ),
         Limiter(
-            threshold_db=-1.5,
-            release_ms=80.0,
+            threshold_db=-1.3,
+            release_ms=90.0,
         ),
-        Gain(gain_db=-0.5),
-    ])
+        Gain(gain_db=-0.7),
+    ]
+
+    plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
+    board = Pedalboard(plugins)
 
     processed = board(pb_input, sr)
     return _restore_shape(processed, audio)

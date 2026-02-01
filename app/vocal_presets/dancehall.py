@@ -201,11 +201,11 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
 
     is_female = (gender or "male").lower() == "female"
 
-    highpass_cutoff = 90.0 if not is_female else 110.0
-    deesser_freq = 7000.0 if not is_female else 7500.0
-    deesser_threshold = -28.0 if not is_female else -30.0
-    compressor_threshold = -18.0 if not is_female else -20.0
-    highshelf_gain = 1.5 if not is_female else 2.0
+    highpass_cutoff = 95.0 if not is_female else 115.0
+    deesser_freq = 7100.0 if not is_female else 7600.0
+    deesser_threshold = -30.0 if not is_female else -32.0
+    compressor_threshold = -20.0 if not is_female else -22.0
+    highshelf_gain = 2.0 if not is_female else 2.5
 
     plugins = [
         # 2) High‑pass filter – slightly higher for female voices.
@@ -221,45 +221,45 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
         # 5) Primary compressor – punchy, modern dancehall feel.
         Compressor(
             threshold_db=compressor_threshold,
-            ratio=4.5,
+            ratio=4.8,
             attack_ms=4.0,
-            release_ms=80.0,
+            release_ms=90.0,
         ),
         # 6) Tone‑shaping EQ
         LowShelfFilter(
             cutoff_frequency_hz=180.0,
-            gain_db=-1.5,
+            gain_db=-2.5,
         ),
         PeakFilter(
             cutoff_frequency_hz=2500.0,
-            gain_db=3.0,
-            q=1.1,
+            gain_db=4.0,
+            q=1.0,
         ),
         HighShelfFilter(
-            cutoff_frequency_hz=9000.0,
+            cutoff_frequency_hz=9500.0,
             gain_db=highshelf_gain,
         ),
         # 7) Harmonic saturation for energy and edge.
-        Saturation(drive_db=6.0),
+        Saturation(drive_db=7.0),
         # 8) Space and vibe – short plate reverb and slap delay.
         Reverb(
-            room_size=0.25,
-            damping=0.4,
-            wet_level=0.16,
-            dry_level=0.84,
+            room_size=0.26,
+            damping=0.42,
+            wet_level=0.2,
+            dry_level=0.8,
             width=1.0,
         ),
         Delay(
-            delay_seconds=0.26,
-            feedback=0.24,
-            mix=0.18,
+            delay_seconds=0.27,
+            feedback=0.26,
+            mix=0.21,
         ),
         # 9) Final limiter with safe streaming headroom.
         Limiter(
-            threshold_db=-1.5,
-            release_ms=100.0,
+            threshold_db=-1.3,
+            release_ms=110.0,
         ),
-        Gain(gain_db=-0.5),
+        Gain(gain_db=-0.7),
     ]
 
     # Filter out any local fallback processors that are not real pedalboard plugins
