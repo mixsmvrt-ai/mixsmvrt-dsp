@@ -133,7 +133,7 @@ def _restore_shape(processed: np.ndarray, original: np.ndarray) -> np.ndarray:
     return out if channels_first else out.T
 
 
-def process_beat_or_master(audio: np.ndarray, sr: int) -> np.ndarray:
+def process_beat_or_master(audio: np.ndarray, sr: int, overrides: dict | None = None) -> np.ndarray:
     """Beat/master bus preset for more polished tone.
 
     - Gentle low-end clean-up
@@ -149,13 +149,24 @@ def process_beat_or_master(audio: np.ndarray, sr: int) -> np.ndarray:
     norm = _pre_loudness_normalize(audio, sr, target_lufs=-14.0)
     pb_input = _prepare_for_pedalboard(norm)
 
+    # Allow reference analysis (via the "streaming_master" preset overrides)
+    # to gently steer bus compression toward the reference loudness.
+    base_comp_threshold = -14.0
+    if overrides and isinstance(overrides, dict):
+        comp_cfg = overrides.get("compressor") or {}
+        try:
+            th = float(comp_cfg.get("threshold"))
+            base_comp_threshold = th
+        except (TypeError, ValueError):
+            pass
+
     plugins = [
         HighpassFilter(cutoff_frequency_hz=30.0),
         LowShelfFilter(cutoff_frequency_hz=120.0, gain_db=-2.5),
         PeakFilter(cutoff_frequency_hz=350.0, gain_db=-1.5, q=0.9),
         PeakFilter(cutoff_frequency_hz=2500.0, gain_db=2.0, q=0.9),
         HighShelfFilter(cutoff_frequency_hz=10000.0, gain_db=2.0),
-        Compressor(threshold_db=-14.0, ratio=2.0, attack_ms=12.0, release_ms=120.0),
+        Compressor(threshold_db=base_comp_threshold, ratio=2.0, attack_ms=12.0, release_ms=120.0),
         Saturation(drive_db=4.0),
         Limiter(threshold_db=-1.0, release_ms=120.0),
         Gain(gain_db=0.0),

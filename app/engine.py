@@ -148,7 +148,11 @@ def process_audio(
         # Non‑vocal tracks: use a dedicated pedalboard-based bus chain for
         # beats/masters, and fall back to the original stub chain for others.
         if track_type in {"beat", "master"}:
-            processed = process_beat_or_master(audio, sr)
+            master_overrides = None
+            if isinstance(reference_overrides, dict):
+                master_overrides = reference_overrides.get("streaming_master")
+
+            processed = process_beat_or_master(audio, sr, master_overrides)
         else:
             chain = TRACK_CHAINS.get(track_type)
             if chain is None:
