@@ -4,6 +4,7 @@ import soundfile as sf
 
 from app.chains import TRACK_CHAINS
 from app.presets import PRESETS
+from app.beat_mastering import process_beat_or_master
 from app.storage import upload_file_to_s3
 from app.throw_fx import apply_throw_fx_to_vocal
 from app.vocal_presets import (
@@ -144,24 +145,28 @@ def process_audio(
                 params = preset.get(processor.__name__, {})
                 processed = processor(processed, sr, params)
     else:
-        # Non‑vocal tracks use the original chain/preset system.
-        chain = TRACK_CHAINS.get(track_type)
-        if chain is None:
-            raise ValueError(f"Unknown track_type: {track_type}")
+        # Non‑vocal tracks: use a dedicated pedalboard-based bus chain for
+        # beats/masters, and fall back to the original stub chain for others.
+        if track_type in {"beat", "master"}:
+            processed = process_beat_or_master(audio, sr)
+        else:
+            chain = TRACK_CHAINS.get(track_type)
+            if chain is None:
+                raise ValueError(f"Unknown track_type: {track_type}")
 
-        base_preset = PRESETS.get(preset_name, {})
-        preset = _merge_preset_with_overrides(
-            base_preset,
-            (reference_overrides or {}).get(preset_name) if isinstance(reference_overrides, dict) else None,
-        )
+            base_preset = PRESETS.get(preset_name, {})
+            preset = _merge_preset_with_overrides(
+                base_preset,
+                (reference_overrides or {}).get(preset_name) if isinstance(reference_overrides, dict) else None,
+            )
 
-        # Apply beat-safe overrides for beats and instrumentals when requested.
-        if target and target.lower() == "beat":
-            preset = _apply_beat_safe_overrides(preset)
-        processed = audio.copy()
-        for processor in chain:
-            params = preset.get(processor.__name__, {})
-            processed = processor(processed, sr, params)
+            # Apply beat-safe overrides for beats and instrumentals when requested.
+            if target and target.lower() == "beat":
+                preset = _apply_beat_safe_overrides(preset)
+            processed = audio.copy()
+            for processor in chain:
+                params = preset.get(processor.__name__, {})
+                processed = processor(processed, sr, params)
 
     # Optional throw FX for vocals – applied after the core vocal chain so
     # throws sit around the already-shaped vocal.
