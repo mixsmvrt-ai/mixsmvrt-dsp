@@ -8,3 +8,5 @@ pyloudnorm
 python-multipart
 boto3
 pedalboard>=0.9.8
+essentia
+pyworld
