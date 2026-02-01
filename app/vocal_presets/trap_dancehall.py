@@ -177,7 +177,9 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     if audio.size == 0:
         return audio
 
-    norm = _pre_loudness_normalize(audio, sr, target_lufs=-18.0)
+    # Trap‑dancehall sits dense in modern mixes; keep it upfront
+    # but leave a little more headroom for throw FX and mastering.
+    norm = _pre_loudness_normalize(audio, sr, target_lufs=-18.5)
     pb_input = _prepare_for_pedalboard(norm)
 
     # Optional pitch correction using an external tuner plugin if available.
@@ -185,39 +187,39 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
 
     is_female = (gender or "male").lower() == "female"
 
-    highpass_cutoff = 115.0 if not is_female else 130.0
-    deesser_freq = 7300.0 if not is_female else 7800.0
-    deesser_threshold = -31.0 if not is_female else -33.0
-    highshelf_gain = 2.5 if not is_female else 3.0
+    highpass_cutoff = 120.0 if not is_female else 135.0
+    deesser_freq = 7400.0 if not is_female else 7900.0
+    deesser_threshold = -32.0 if not is_female else -34.0
+    highshelf_gain = 2.8 if not is_female else 3.2
 
     plugins = [
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
-        NoiseGate(threshold_db=-44.0, ratio=2.6, release_ms=140.0),
+        NoiseGate(threshold_db=-46.0, ratio=2.8, release_ms=150.0),
         Deesser(
             frequency=deesser_freq,
             threshold_db=deesser_threshold,
             ratio=4.8,
         ),
         Compressor(
-            threshold_db=-21.0,
-            ratio=5.2,
-            attack_ms=3.0,
-            release_ms=75.0,
+            threshold_db=-22.0,
+            ratio=5.4,
+            attack_ms=2.5,
+            release_ms=80.0,
         ),
         LowShelfFilter(
             cutoff_frequency_hz=200.0,
             gain_db=-2.5,
         ),
         PeakFilter(
-            cutoff_frequency_hz=3300.0,
-            gain_db=4.5,
-            q=0.95,
+            cutoff_frequency_hz=3400.0,
+            gain_db=4.8,
+            q=0.9,
         ),
         HighShelfFilter(
             cutoff_frequency_hz=10500.0,
             gain_db=highshelf_gain,
         ),
-        Saturation(drive_db=8.0),
+        Saturation(drive_db=8.5),
         Reverb(
             room_size=0.24,
             damping=0.42,

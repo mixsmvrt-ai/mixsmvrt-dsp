@@ -184,7 +184,9 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     if audio.size == 0:
         return audio
 
-    norm = _pre_loudness_normalize(audio, sr, target_lufs=-19.0)
+    # Afrobeat leads are bright but a bit more open; keep them
+    # slightly less dense than hard rap presets.
+    norm = _pre_loudness_normalize(audio, sr, target_lufs=-19.5)
     pb_input = _prepare_for_pedalboard(norm)
 
     # Optional pitch correction using an external tuner plugin if available.
@@ -192,38 +194,38 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
 
     is_female = (gender or "male").lower() == "female"
 
-    highpass_cutoff = 85.0 if not is_female else 95.0
-    deesser_freq = 6600.0 if not is_female else 7100.0
-    highshelf_gain = 1.8 if not is_female else 2.2
+    highpass_cutoff = 88.0 if not is_female else 98.0
+    deesser_freq = 6700.0 if not is_female else 7200.0
+    highshelf_gain = 2.0 if not is_female else 2.4
 
     plugins = [
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
-        NoiseGate(threshold_db=-50.0, ratio=1.8, release_ms=150.0),
+        NoiseGate(threshold_db=-51.0, ratio=1.9, release_ms=155.0),
         Deesser(
             frequency=deesser_freq,
             threshold_db=-29.0,
             ratio=3.0,
         ),
         Compressor(
-            threshold_db=-19.0,
-            ratio=3.3,
-            attack_ms=7.0,
-            release_ms=130.0,
+            threshold_db=-19.5,
+            ratio=3.5,
+            attack_ms=6.0,
+            release_ms=135.0,
         ),
         LowShelfFilter(
             cutoff_frequency_hz=200.0,
             gain_db=0.0,
         ),
         PeakFilter(
-            cutoff_frequency_hz=2200.0,
-            gain_db=2.5,
+            cutoff_frequency_hz=2300.0,
+            gain_db=2.8,
             q=0.9,
         ),
         HighShelfFilter(
             cutoff_frequency_hz=9500.0,
             gain_db=highshelf_gain,
         ),
-        Saturation(drive_db=5.0),
+        Saturation(drive_db=5.5),
         Reverb(
             room_size=0.3,
             damping=0.46,
