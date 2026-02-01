@@ -27,6 +27,43 @@ mixsmvrt-dsp/
 
 ## Installation
 
+First install the system-level audio tools, then the Python packages.
+
+### System dependencies
+
+The DSP engine relies on:
+
+- **libsndfile** (backend used by `soundfile` for reading/writing audio)
+- **ffmpeg** (recommended so you can handle a wide range of formats like mp3, m4a, flac)
+
+Install them on your platform before running the service:
+
+- **Ubuntu / Debian**
+
+  ```bash
+  sudo apt-get update
+  sudo apt-get install -y ffmpeg libsndfile1
+  ```
+
+- **macOS (Homebrew)**
+
+  ```bash
+  brew install ffmpeg libsndfile
+  ```
+
+- **Windows (chocolatey)**
+
+  ```powershell
+  choco install ffmpeg
+  choco install libsndfile
+  ```
+
+  Or install prebuilt binaries from the official ffmpeg/libsndfile sites and ensure they are on your `PATH`.
+
+### Python packages
+
+From the `mixsmvrt-dsp` folder:
+
 ```bash
 pip install -r requirements.txt
 ```
