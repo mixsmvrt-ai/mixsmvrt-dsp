@@ -67,7 +67,7 @@ async def process(
             overrides_dict = None
 
     try:
-        output_path = process_audio(
+        output_paths = process_audio(
             file,
             track_type,
             preset,
@@ -81,9 +81,24 @@ async def process(
         # Surface a more descriptive error than the default "Internal Server Error"
         # so upstream services and the studio UI can see what went wrong.
         raise HTTPException(status_code=500, detail=f"DSP processing failed: {exc}") from exc
+    # Normalise outputs so callers always have a primary output_file (WAV)
+    # while also exposing a richer output_files map for multi-format exports.
+    if isinstance(output_paths, dict):
+        wav_path = output_paths.get("wav")
+        mp3_path = output_paths.get("mp3")
+    else:  # backwards-compat: older engine versions may return a single string
+        wav_path = output_paths
+        mp3_path = None
+
     return {
         "status": "processed",
-        "output_file": output_path,
+        # Primary output remains the WAV path for backwards compatibility.
+        "output_file": wav_path,
+        # New multi-format map used by the studio for WAV/MP3 downloads.
+        "output_files": {
+            "wav": wav_path,
+            "mp3": mp3_path,
+        },
         "track_type": track_type,
         "preset": preset,
         "genre": genre,

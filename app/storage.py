@@ -48,7 +48,16 @@ def upload_file_to_s3(local_path: str, *, key_prefix: Optional[str] = None) -> s
     unique_id = uuid.uuid4().hex
     object_key = f"{prefix}/{unique_id}_{path.name}"
 
-    extra_args = {"ContentType": "audio/wav"}
+    # Infer a reasonable content type from the file extension.
+    suffix = path.suffix.lower()
+    if suffix == ".mp3":
+        content_type = "audio/mpeg"
+    elif suffix in {".wav", ".wave"}:
+        content_type = "audio/wav"
+    else:
+        content_type = "application/octet-stream"
+
+    extra_args = {"ContentType": content_type}
 
     client.upload_file(str(path), bucket, object_key, ExtraArgs=extra_args)
 

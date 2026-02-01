@@ -1,4 +1,5 @@
 import tempfile
+import subprocess
 
 import soundfile as sf
 
@@ -100,7 +101,7 @@ def process_audio(
     reference_overrides: dict | None = None,
     target: str | None = None,
     throw_fx_mode: str | None = None,
-) -> str:
+) -> dict[str, str | None]:
     """Run a simple offline DSP chain over the uploaded audio.
 
     - Reads the uploaded file via soundfile
@@ -177,8 +178,31 @@ def process_audio(
     if track_type == "vocal" and throw_fx_mode:
         processed = apply_throw_fx_to_vocal(processed, sr, throw_fx_mode)
 
-    out_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
-    sf.write(out_file.name, processed, sr)
+    # Always render a high-quality WAV first.
+    out_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+    sf.write(out_wav.name, processed, sr)
+    wav_url_or_path = upload_file_to_s3(out_wav.name)
 
-    # Store processed output in S3 when configured; otherwise return local path.
-    return upload_file_to_s3(out_file.name)
+    # Best-effort MP3 encode using ffmpeg when available. If encoding fails
+    # for any reason, we still return the WAV so the caller has a valid
+    # output to work with.
+    mp3_url_or_path: str | None = None
+    try:
+        out_mp3 = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        cmd = [
+            "ffmpeg",
+            "-y",  # overwrite without prompting
+            "-i",
+            out_wav.name,
+            "-codec:a",
+            "libmp3lame",
+            "-b:a",
+            "320k",
+            out_mp3.name,
+        ]
+        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        mp3_url_or_path = upload_file_to_s3(out_mp3.name)
+    except Exception:
+        mp3_url_or_path = None
+
+    return {"wav": wav_url_or_path, "mp3": mp3_url_or_path}
