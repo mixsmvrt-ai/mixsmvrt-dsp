@@ -107,29 +107,29 @@ def _restore_shape(processed: np.ndarray, original: np.ndarray) -> np.ndarray:
 def _map_brightness_to_shelf(brightness_hz: float, genre: Optional[str]) -> float:
     """Map spectral brightness to a gentle high-shelf gain.
 
-    Very bright sources get slightly softer highs, darker sources get
-    a modest boost, keeping moves subtle for production safety.
+    Genre subtly shapes the base tilt so trap/rap/dancehall feel
+    a bit more hyped on top, while reggae/R&B stay smoother.
     """
 
     base = 0.0
     if genre:
         g = genre.lower()
         if any(k in g for k in ("trap", "dancehall", "rap", "hiphop")):
-            base = 1.0
+            base = 1.5
         elif any(k in g for k in ("rnb", "r&b")):
-            base = 0.5
+            base = 0.8
         elif "reggae" in g:
-            base = 0.0
+            base = 0.2
 
     if brightness_hz <= 1800.0:
-        delta = 2.0
+        delta = 2.2
     elif brightness_hz >= 4500.0:
-        delta = -2.0
+        delta = -2.2
     else:
         # Smooth interpolation between dark and bright
         t = (brightness_hz - 1800.0) / (4500.0 - 1800.0)
-        delta = 2.0 * (1.0 - 2.0 * t)
-    return float(np.clip(base + delta, -3.0, 3.0))
+        delta = 2.2 * (1.0 - 2.0 * t)
+    return float(np.clip(base + delta, -3.5, 3.5))
 
 
 def _map_transients_to_attack(transients: float) -> float:
@@ -140,14 +140,40 @@ def _map_transients_to_attack(transients: float) -> float:
     return float(20.0 - 15.0 * transients)
 
 
-def _map_dynamic_range_to_ratio(dynamic_range: float) -> float:
+def _map_dynamic_range_to_ratio(dynamic_range: float, genre: Optional[str], track_type: str) -> float:
+    """Map measured dynamic range to compressor ratio with genre flavour.
+
+    Trap/rap/dancehall lean a bit more controlled, R&B/Reggae a
+    touch looser, and masters are slightly firmer than vocals.
+    """
+
     dynamic_range = float(max(dynamic_range, 0.0))
+
+    # Base curve for vocal-style sources
     if dynamic_range <= 6.0:
-        return 1.8
-    if dynamic_range >= 14.0:
-        return 3.5
-    t = (dynamic_range - 6.0) / (14.0 - 6.0)
-    return float(1.8 + t * (3.5 - 1.8))
+        base = 2.0
+    elif dynamic_range >= 14.0:
+        base = 3.8
+    else:
+        t = (dynamic_range - 6.0) / (14.0 - 6.0)
+        base = 2.0 + t * (3.8 - 2.0)
+
+    # Genre flavour
+    flavour = 0.0
+    if genre:
+        g = genre.lower()
+        if any(k in g for k in ("trap", "dancehall", "rap", "hiphop")):
+            flavour = 0.3
+        elif any(k in g for k in ("rnb", "r&b")):
+            flavour = -0.1
+        elif "reggae" in g:
+            flavour = -0.2
+
+    # Masters get a slightly firmer ratio than vocals at the same DR.
+    if track_type == "master":
+        flavour += 0.2
+
+    return float(np.clip(base + flavour, 1.6, 4.2))
 
 
 def _map_pitch_to_saturation(pitch_info: Mapping[str, Any] | None, default_drive: float = 4.0) -> float:
@@ -203,7 +229,7 @@ def build_pedalboard_chain(
 
     shelf_gain = _map_brightness_to_shelf(brightness_hz, genre)
     attack_ms = _map_transients_to_attack(transients)
-    ratio = _map_dynamic_range_to_ratio(dynamic_range)
+    ratio = _map_dynamic_range_to_ratio(dynamic_range, genre, track_type)
     drive_db = _map_pitch_to_saturation(pitch_info, default_drive=4.0)
     deesser_freq, deesser_amount = _map_pitch_to_deesser(pitch_info, base_freq=7200.0)
 
