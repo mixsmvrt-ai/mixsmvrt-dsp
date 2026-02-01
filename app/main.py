@@ -50,6 +50,8 @@ async def process(
     target: str | None = Form(None),
     gender: str | None = Form(None),
     throw_fx_mode: str | None = Form(None),
+    session_key: str | None = Form(None),
+    session_scale: str | None = Form(None),
 ):
     """Process an uploaded audio file with the given track type + preset.
 
@@ -76,6 +78,8 @@ async def process(
             overrides_dict,
             target,
             throw_fx_mode=throw_fx_mode,
+            session_key=session_key,
+            session_scale=session_scale,
         )
     except Exception as exc:  # pragma: no cover - defensive, logs via HTTP detail
         # Surface a more descriptive error than the default "Internal Server Error"

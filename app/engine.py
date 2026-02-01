@@ -4,11 +4,10 @@ import subprocess
 
 import soundfile as sf
 
-from app.chains import TRACK_CHAINS
-from app.presets import PRESETS
 from app.beat_mastering import process_beat_or_master
 from app.storage import upload_file_to_s3
 from app.throw_fx import apply_throw_fx_to_vocal
+from app.vocal_presets.tuning import apply_pitch_correction
 from app.vocal_presets import (
     dancehall,
     trap_dancehall,
@@ -108,6 +107,8 @@ def process_audio(
     reference_overrides: dict | None = None,
     target: str | None = None,
     throw_fx_mode: str | None = None,
+    session_key: str | None = None,
+    session_scale: str | None = None,
 ) -> dict[str, str | None]:
     """Run a simple offline DSP chain over the uploaded audio.
 
@@ -140,6 +141,21 @@ def process_audio(
             logger.debug("[DSP] Pitch analysis completed: %s", pitch_profile)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[DSP] WORLD pitch analysis failed: %s", exc)
+
+    # If this is a vocal track and the studio provided a key/scale,
+    # run a gentle key-aware pitch correction pass before the main
+    # vocal processing chain. This uses WORLD-based analysis when
+    # available and falls back gracefully when not.
+    if track_type == "vocal" and session_key:
+        try:
+            audio = apply_pitch_correction(
+                audio,
+                sr,
+                session_key=session_key,
+                session_scale=session_scale,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[DSP] Key-aware pitch correction failed: %s", exc)
 
     # If this is a vocal track and a genre or matching preset is provided,
     # route through the dedicated genre-specific vocal chains.
