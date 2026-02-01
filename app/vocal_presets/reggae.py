@@ -28,62 +28,64 @@ except Exception:
             import numpy as _np
             rc = 1.0 / (2 * _np.pi * self.cutoff)
             dt = 1.0 / float(sample_rate)
-            alpha = rc / (rc + dt)
-            out = _np.zeros_like(audio)
-            out[0] = audio[0]
-            for i in range(1, len(audio)):
-                out[i] = alpha * (out[i - 1] + audio[i] - audio[i - 1])
-            return out
-
-try:
-    from pedalboard import Compressor  # type: ignore
-except Exception:
-    class Compressor:
-        def __init__(self, threshold_db: float = -18.0, ratio: float = 2.0, **kwargs) -> None:
-            self.threshold = threshold_db
-            self.ratio = ratio
-
-        def __call__(self, audio, sample_rate):
-            import numpy as _np
-            threshold_lin = 10.0 ** (self.threshold / 20.0)
-            mag = _np.abs(audio)
-            over = _np.maximum(mag - threshold_lin, 0.0)
-            gain = 1.0 / (1.0 + (self.ratio - 1.0) * over)
-            return audio * gain
-
-try:
-    from pedalboard import Limiter  # type: ignore
-except Exception:
-    class Limiter:
-        def __init__(self, threshold_db: float = -1.0, **kwargs) -> None:
-            self.threshold = 10.0 ** (threshold_db / 20.0)
-
-        def __call__(self, audio, sample_rate):
-            import numpy as _np
-            return _np.clip(audio, -self.threshold, self.threshold)
-
-try:
-    from pedalboard import NoiseGate  # type: ignore
-except Exception:
-    class NoiseGate:
-        def __init__(self, threshold_db: float = -60.0, **kwargs) -> None:
-            self.threshold = 10.0 ** (threshold_db / 20.0)
-
-        def __call__(self, audio, sample_rate):
-            import numpy as _np
-            mag = _np.abs(audio)
-            mask = mag >= self.threshold
-            return audio * mask
-
-try:
-    from pedalboard import PeakFilter, HighShelfFilter, LowShelfFilter  # type: ignore
-except Exception:
-    class PeakFilter:
-        def __init__(self, *args, **kwargs) -> None:
-            pass
-
-        def __call__(self, audio, sample_rate):
-            return audio
+            plugins = [
+                # Front-of-chain cleanup
+                HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
+                NoiseGate(threshold_db=-56.0, ratio=1.6, release_ms=210.0),
+                Deesser(
+                    frequency=deesser_freq,
+                    threshold_db=-32.0,
+                    ratio=2.0,
+                ),
+                # Subtractive EQ – keep rootsy low end but manage boom
+                LowShelfFilter(
+                    cutoff_frequency_hz=180.0,
+                    gain_db=2.0,
+                ),
+                # Level compressor – relaxed control to preserve reggae dynamics
+                Compressor(
+                    threshold_db=-19.0,
+                    ratio=2.2,
+                    attack_ms=14.0,
+                    release_ms=190.0,
+                ),
+                # Additive EQ – mid articulation and gentle top
+                PeakFilter(
+                    cutoff_frequency_hz=1600.0,
+                    gain_db=1.5,
+                    q=0.85,
+                ),
+                HighShelfFilter(
+                    cutoff_frequency_hz=9200.0,
+                    gain_db=highshelf_gain,
+                ),
+                # Glue compressor – very gentle, mostly to sit the EQ’d tone
+                Compressor(
+                    threshold_db=-18.0,
+                    ratio=2.0,
+                    attack_ms=22.0,
+                    release_ms=210.0,
+                ),
+                # Colour + space + safety
+                Saturation(drive_db=3.5),
+                Reverb(
+                    room_size=0.37,
+                    damping=0.56,
+                    wet_level=0.25,
+                    dry_level=0.75,
+                    width=1.0,
+                ),
+                Delay(
+                    delay_seconds=0.35,
+                    feedback=0.3,
+                    mix=0.24,
+                ),
+                Limiter(
+                    threshold_db=-1.8,
+                    release_ms=170.0,
+                ),
+                Gain(gain_db=-0.7),
+            ]
 
     class HighShelfFilter(PeakFilter):
         pass

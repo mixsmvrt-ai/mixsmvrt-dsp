@@ -191,6 +191,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     highshelf_gain = 3.0 if not is_female else 3.5
 
     plugins = [
+        # Front-of-chain cleanup
         HighpassFilter(cutoff_frequency_hz=highpass_cutoff),
         NoiseGate(threshold_db=-48.0, ratio=2.4, release_ms=130.0),
         Deesser(
@@ -198,16 +199,19 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             threshold_db=-30.0,
             ratio=4.0,
         ),
+        # Subtractive EQ – firm low‑end control before hard compression
+        LowShelfFilter(
+            cutoff_frequency_hz=210.0,
+            gain_db=-2.0,
+        ),
+        # Level compressor – very assertive peak/density stage
         Compressor(
             threshold_db=-23.5,
             ratio=5.8,
             attack_ms=4.0,
             release_ms=85.0,
         ),
-        LowShelfFilter(
-            cutoff_frequency_hz=210.0,
-            gain_db=-2.0,
-        ),
+        # Additive EQ – upper‑mid cut-through and air
         PeakFilter(
             cutoff_frequency_hz=3200.0,
             gain_db=4.5,
@@ -217,6 +221,14 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             cutoff_frequency_hz=11000.0,
             gain_db=highshelf_gain,
         ),
+        # Glue compressor – a bit slower to pull everything together
+        Compressor(
+            threshold_db=-20.0,
+            ratio=2.8,
+            attack_ms=14.0,
+            release_ms=130.0,
+        ),
+        # Colour + space + safety
         Saturation(drive_db=7.5),
         Reverb(
             room_size=0.2,

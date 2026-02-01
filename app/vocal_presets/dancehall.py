@@ -218,18 +218,19 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             threshold_db=deesser_threshold,
             ratio=4.0,
         ),
-        # 5) Primary compressor – punchy, modern dancehall feel.
+        # 5) Subtractive EQ – clean low end before hard compression.
+        LowShelfFilter(
+            cutoff_frequency_hz=180.0,
+            gain_db=-2.5,
+        ),
+        # 6) Primary compressor – punchy, modern dancehall feel.
         Compressor(
             threshold_db=compressor_threshold,
             ratio=4.8,
             attack_ms=4.0,
             release_ms=90.0,
         ),
-        # 6) Tone‑shaping EQ
-        LowShelfFilter(
-            cutoff_frequency_hz=180.0,
-            gain_db=-2.5,
-        ),
+        # 7) Additive EQ – presence and top end.
         PeakFilter(
             cutoff_frequency_hz=2500.0,
             gain_db=4.0,
@@ -239,9 +240,16 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             cutoff_frequency_hz=9500.0,
             gain_db=highshelf_gain,
         ),
-        # 7) Harmonic saturation for energy and edge.
+        # 8) Glue compressor – softer, to sit the bright tone.
+        Compressor(
+            threshold_db=compressor_threshold + 2.0,
+            ratio=2.6,
+            attack_ms=15.0,
+            release_ms=140.0,
+        ),
+        # 9) Harmonic saturation for energy and edge.
         Saturation(drive_db=7.0),
-        # 8) Space and vibe – short plate reverb and slap delay.
+        # 10) Space and vibe – short plate reverb and slap delay.
         Reverb(
             room_size=0.26,
             damping=0.42,
@@ -254,7 +262,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             feedback=0.26,
             mix=0.21,
         ),
-        # 9) Final limiter with safe streaming headroom.
+        # 11) Final limiter with safe streaming headroom.
         Limiter(
             threshold_db=-1.3,
             release_ms=110.0,
