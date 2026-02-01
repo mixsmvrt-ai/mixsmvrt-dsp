@@ -201,29 +201,45 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             threshold_db=deesser_threshold,
             ratio=4.8,
         ),
-        # Subtractive EQ: tame rumble/mud before heavy dynamics
+        # Subtractive EQ block – similar in spirit to a Neutron-style
+        # cleanup: cut rumble, mud, and a couple of harsh bands.
         LowShelfFilter(
-            cutoff_frequency_hz=200.0,
-            gain_db=-2.5,
+            cutoff_frequency_hz=140.0,
+            gain_db=-3.0,
         ),
-        # Level/peak compressor – fast, more aggressive
+        PeakFilter(
+            cutoff_frequency_hz=280.0,
+            gain_db=-3.0,
+            q=1.0,
+        ),
+        PeakFilter(
+            cutoff_frequency_hz=550.0,
+            gain_db=-2.5,
+            q=1.2,
+        ),
+        PeakFilter(
+            cutoff_frequency_hz=4475.0,
+            gain_db=-7.0,
+            q=8.5,
+        ),
+        # Level/peak compressor – fast and assertive, after cleanup
         Compressor(
             threshold_db=-22.0,
             ratio=5.4,
             attack_ms=2.5,
             release_ms=80.0,
         ),
-        # Additive/shape EQ: presence + air
+        # Additive/shape EQ block – bring back controlled presence and air
         PeakFilter(
-            cutoff_frequency_hz=3400.0,
-            gain_db=4.8,
+            cutoff_frequency_hz=2400.0,
+            gain_db=3.0,
             q=0.9,
         ),
         HighShelfFilter(
             cutoff_frequency_hz=10500.0,
             gain_db=highshelf_gain,
         ),
-        # Glue compressor – slightly gentler, after tone shaping
+        # Glue compressor – slightly gentler bus-style squeeze
         Compressor(
             threshold_db=-18.0,
             ratio=2.6,
