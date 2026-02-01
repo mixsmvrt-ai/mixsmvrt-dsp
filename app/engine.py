@@ -1,3 +1,4 @@
+import logging
 import tempfile
 import subprocess
 
@@ -17,6 +18,12 @@ from app.vocal_presets import (
     rnb,
     rap,
 )
+from app.dsp.analysis.essentia_analysis import analyze_mono_signal
+from app.dsp.analysis.pitch_world import analyze_pitch_world
+from app.dsp.chains.build_chain import process_with_dynamic_chain
+
+
+logger = logging.getLogger(__name__)
 
 
 VOCAL_GENRE_PROCESSORS = {
@@ -110,8 +117,29 @@ def process_audio(
     - Writes a processed WAV to a temp file and returns the path
     """
 
-    # Read raw samples
+    # Read raw samples once; downstream layers must not mutate ``audio``
+    # in-place to keep analysis and processing well separated.
     audio, sr = sf.read(file.file)
+
+    # ---------------------------------
+    # 1) ANALYSIS LAYER
+    # ---------------------------------
+    analysis_features = None
+    pitch_profile = None
+
+    try:
+        analysis_features = analyze_mono_signal(audio, sr)
+        logger.debug("[DSP] Analysis completed: %s", analysis_features)
+    except Exception as exc:  # pragma: no cover - defensive path
+        logger.warning("[DSP] Analysis failed (Essentia/numpy): %s", exc)
+
+    # WORLD-based pitch analysis is only relevant for vocals.
+    if track_type == "vocal":
+        try:
+            pitch_profile = analyze_pitch_world(audio, sr)
+            logger.debug("[DSP] Pitch analysis completed: %s", pitch_profile)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[DSP] WORLD pitch analysis failed: %s", exc)
 
     # If this is a vocal track and a genre or matching preset is provided,
     # route through the dedicated genre-specific vocal chains.
@@ -129,22 +157,21 @@ def process_audio(
             # Fallback to gender-agnostic preset.
             vocal_processor = VOCAL_GENRE_PROCESSORS.get(base_key)
         if vocal_processor is not None:
+            # Genre-aware, pedalboard-centric vocal chains stay in charge
+            # for named presets like trap_dancehall, hiphop, etc.
             processed = vocal_processor(audio, sr)
         else:
-            # Fallback to the generic vocal chain + preset config.
-            chain = TRACK_CHAINS.get(track_type)
-            if chain is None:
-                raise ValueError(f"Unknown track_type: {track_type}")
-
-            base_preset = PRESETS.get(preset_name, {})
-            preset = _merge_preset_with_overrides(
-                base_preset,
-                (reference_overrides or {}).get(preset_name) if isinstance(reference_overrides, dict) else None,
+            # Generic vocal path: upgrade to the dynamic Pedalboard chain
+            # driven by analysis + WORLD pitch metrics.
+            processed = process_with_dynamic_chain(
+                audio=audio,
+                sr=sr,
+                preset_key=preset_name,
+                track_type=track_type,
+                analysis=analysis_features or {},
+                pitch_info=pitch_profile or {},
+                genre=genre,
             )
-            processed = audio.copy()
-            for processor in chain:
-                params = preset.get(processor.__name__, {})
-                processed = processor(processed, sr, params)
     else:
         # Non‑vocal tracks: use a dedicated pedalboard-based bus chain for
         # beats/masters, and fall back to the original stub chain for others.
@@ -155,29 +182,27 @@ def process_audio(
 
             processed = process_beat_or_master(audio, sr, master_overrides)
         else:
-            chain = TRACK_CHAINS.get(track_type)
-            if chain is None:
-                raise ValueError(f"Unknown track_type: {track_type}")
-
-            base_preset = PRESETS.get(preset_name, {})
-            preset = _merge_preset_with_overrides(
-                base_preset,
-                (reference_overrides or {}).get(preset_name) if isinstance(reference_overrides, dict) else None,
+            # For other non-vocal tracks, use the upgraded dynamic
+            # Pedalboard chain, but still allow the backend to hint
+            # whether this should be treated as a dedicated beat bus.
+            processed = process_with_dynamic_chain(
+                audio=audio,
+                sr=sr,
+                preset_key=preset_name,
+                track_type=track_type,
+                analysis=analysis_features or {},
+                pitch_info=None,
+                genre=genre,
             )
-
-            # Apply beat-safe overrides for beats and instrumentals when requested.
-            if target and target.lower() == "beat":
-                preset = _apply_beat_safe_overrides(preset)
-            processed = audio.copy()
-            for processor in chain:
-                params = preset.get(processor.__name__, {})
-                processed = processor(processed, sr, params)
 
     # Optional throw FX for vocals – applied after the core vocal chain so
     # throws sit around the already-shaped vocal.
     if track_type == "vocal" and throw_fx_mode:
         processed = apply_throw_fx_to_vocal(processed, sr, throw_fx_mode)
 
+    # ---------------------------------
+    # 3) FINALISATION LAYER (render + export)
+    # ---------------------------------
     # Always render a high-quality WAV first.
     out_wav = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
     sf.write(out_wav.name, processed, sr)
@@ -204,5 +229,7 @@ def process_audio(
         mp3_url_or_path = upload_file_to_s3(out_mp3.name)
     except Exception:
         mp3_url_or_path = None
+
+    logger.debug("[DSP] Processing finished: wav=%s mp3=%s", wav_url_or_path, mp3_url_or_path)
 
     return {"wav": wav_url_or_path, "mp3": mp3_url_or_path}

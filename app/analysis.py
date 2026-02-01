@@ -1,6 +1,8 @@
 import librosa
 import numpy as np
 
+from app.dsp.analysis.essentia_analysis import analyze_mono_signal
+from app.dsp.analysis.pitch_world import analyze_pitch_world
 from app.processors.loudness import measure_loudness
 
 
@@ -71,6 +73,11 @@ def analyze_audio(file):
     # Crude tonal brightness via spectral centroid.
     centroid = float(librosa.feature.spectral_centroid(y=y, sr=sr).mean())
 
+    # Tier-1 analysis: Essentia + WORLD (with safe fallbacks when
+    # libraries are not available at runtime).
+    essentia_features = analyze_mono_signal(y, sr)
+    pitch_profile = analyze_pitch_world(y, sr)
+
     preset_overrides = _build_preset_overrides(lufs, centroid)
 
     return {
@@ -81,4 +88,6 @@ def analyze_audio(file):
         "lufs": lufs,
         "brightness_hz": centroid,
         "preset_overrides": preset_overrides,
+        "essentia": essentia_features,
+        "pitch": pitch_profile,
     }
