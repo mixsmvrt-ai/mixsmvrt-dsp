@@ -1,24 +1,34 @@
 from __future__ import annotations
 
-# pyright: strict=false, reportGeneralTypeIssues=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
+# pyright: reportGeneralTypeIssues=false, reportUnknownMemberType=false, reportUnknownArgumentType=false
 
 import numpy as np
 import pyloudnorm as pyln
 from pedalboard import Pedalboard
 
 try:
-    from pedalboard import Deesser
+    from pedalboard import Deesser  # type: ignore
 except Exception:
     class Deesser:
         """Fallback De-Esser using a gentle high-shelf cut as approximation."""
 
-        def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
+        def __init__(
+            self,
+            frequency: float = 7000.0,
+            threshold_db: float = -30.0,
+            ratio: float = 3.0,
+            **kwargs,
+        ) -> None:
             self.frequency = frequency
             self.threshold_db = threshold_db
             self.ratio = ratio
-            self._board = Pedalboard([
-                HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
-            ])
+            # In the fallback path we don't care about exact pedalboard typing,
+            # so we ignore type checking here.
+            self._board = Pedalboard(  # type: ignore
+                [
+                    HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
+                ]
+            )
 
         def __call__(self, audio, sample_rate):
             return self._board(audio, sample_rate)
@@ -139,23 +149,6 @@ except Exception:
         def __call__(self, audio, sample_rate):
             return audio
 
-try:
-    from pedalboard import Deesser  # type: ignore
-except Exception:
-    class Deesser:
-        """Fallback De-Esser using a gentle high-shelf cut as approximation."""
-
-        def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
-            self.frequency = frequency
-            self.threshold_db = threshold_db
-            self.ratio = ratio
-            self._board = Pedalboard([
-                HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
-            ])
-
-        def __call__(self, audio, sample_rate):
-            return self._board(audio, sample_rate)
-
 from .tuning import apply_pitch_correction
 
 
@@ -269,7 +262,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     ]
 
     plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
-    board = Pedalboard(plugins)
+    board = Pedalboard(plugins)  # type: ignore
     processed = board(pb_input, sr)
     return _restore_shape(processed, audio)
 
@@ -287,3 +280,76 @@ def process_vocal_female(audio: np.ndarray, sr: int) -> np.ndarray:
 def process_vocal(audio: np.ndarray, sr: int) -> np.ndarray:
     """Backward‑compatible entry point (defaults to male variant)."""
     return _process_vocal_gender(audio, sr, "male")
+
+
+def _process_background_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.ndarray:
+    if audio.size == 0:
+        return audio
+
+    lead = _process_vocal_gender(audio, sr, gender)
+    pb_input = _prepare_for_pedalboard(lead)
+
+    bg_board = Pedalboard(  # type: ignore
+        [
+            HighpassFilter(cutoff_frequency_hz=170.0),
+            LowShelfFilter(cutoff_frequency_hz=220.0, gain_db=-2.0),
+            HighShelfFilter(cutoff_frequency_hz=11500.0, gain_db=-1.0),
+            Reverb(
+                room_size=0.34,
+                damping=0.5,
+                wet_level=0.3,
+                dry_level=0.7,
+                width=1.0,
+            ),
+            Delay(
+                delay_seconds=0.3,
+                feedback=0.3,
+                mix=0.26,
+            ),
+            Gain(gain_db=-4.5),
+        ]
+    )
+
+    processed = bg_board(pb_input, sr)
+    return _restore_shape(processed, lead)
+
+
+def _process_adlib_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.ndarray:
+    if audio.size == 0:
+        return audio
+
+    lead = _process_vocal_gender(audio, sr, gender)
+    pb_input = _prepare_for_pedalboard(lead)
+
+    adlib_board = Pedalboard(  # type: ignore
+        [
+            HighpassFilter(cutoff_frequency_hz=200.0),
+            PeakFilter(cutoff_frequency_hz=3400.0, gain_db=3.0, q=1.0),
+            HighShelfFilter(cutoff_frequency_hz=12500.0, gain_db=2.2),
+            Saturation(drive_db=7.0),
+            Reverb(
+                room_size=0.5,
+                damping=0.5,
+                wet_level=0.35,
+                dry_level=0.65,
+                width=1.0,
+            ),
+            Delay(
+                delay_seconds=0.32,
+                feedback=0.34,
+                mix=0.32,
+            ),
+            Gain(gain_db=-5.0),
+        ]
+    )
+
+    processed = adlib_board(pb_input, sr)
+    return _restore_shape(processed, lead)
+
+
+def process_vocal_background(audio: np.ndarray, sr: int) -> np.ndarray:
+    return _process_background_gender(audio, sr, "male")
+
+
+def process_vocal_adlib(audio: np.ndarray, sr: int) -> np.ndarray:
+    return _process_adlib_gender(audio, sr, "male")

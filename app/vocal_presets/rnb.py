@@ -126,13 +126,21 @@ except Exception:
     class Deesser:
         """Fallback De-Esser using a gentle high-shelf cut as approximation."""
 
-        def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
+        def __init__(
+            self,
+            frequency: float = 7000.0,
+            threshold_db: float = -30.0,
+            ratio: float = 3.0,
+            **kwargs,
+        ) -> None:
             self.frequency = frequency
             self.threshold_db = threshold_db
             self.ratio = ratio
-            self._board = Pedalboard([
-                HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
-            ])
+            self._board = Pedalboard(  # type: ignore
+                [
+                    HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
+                ]
+            )
 
         def __call__(self, audio, sample_rate):
             return self._board(audio, sample_rate)
@@ -201,8 +209,13 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
         ),
         # Subtractive EQ – gentle low/low-mid shaping for warm R&B body
         LowShelfFilter(
-            cutoff_frequency_hz=160.0,
-            gain_db=1.0,
+            cutoff_frequency_hz=150.0,
+            gain_db=-0.5,
+        ),
+        PeakFilter(
+            cutoff_frequency_hz=260.0,
+            gain_db=-1.5,
+            q=1.0,
         ),
         # Level compressor – keep dynamics under control without killing feel
         Compressor(
@@ -250,7 +263,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     ]
 
     plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
-    board = Pedalboard(plugins)
+    board = Pedalboard(plugins)  # type: ignore
     processed = board(pb_input, sr)
     return _restore_shape(processed, audio)
 
@@ -268,3 +281,78 @@ def process_vocal_female(audio: np.ndarray, sr: int) -> np.ndarray:
 def process_vocal(audio: np.ndarray, sr: int) -> np.ndarray:
     """Backward‑compatible entry point (defaults to male variant)."""
     return _process_vocal_gender(audio, sr, "male")
+
+
+def _process_background_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.ndarray:
+    """R&B background vocals – smooth, darker and more spacious."""
+    if audio.size == 0:
+        return audio
+
+    lead = _process_vocal_gender(audio, sr, gender)
+    pb_input = _prepare_for_pedalboard(lead)
+
+    bg_board = Pedalboard(  # type: ignore
+        [
+            HighpassFilter(cutoff_frequency_hz=150.0),
+            LowShelfFilter(cutoff_frequency_hz=210.0, gain_db=-1.8),
+            HighShelfFilter(cutoff_frequency_hz=10000.0, gain_db=-0.5),
+            Reverb(
+                room_size=0.42,
+                damping=0.5,
+                wet_level=0.34,
+                dry_level=0.66,
+                width=1.0,
+            ),
+            Delay(
+                delay_seconds=0.34,
+                feedback=0.32,
+                mix=0.3,
+            ),
+            Gain(gain_db=-4.0),
+        ]
+    )
+
+    processed = bg_board(pb_input, sr)
+    return _restore_shape(processed, lead)
+
+
+def _process_adlib_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.ndarray:
+    """R&B adlibs – airy, expressive, wetter but still smooth."""
+    if audio.size == 0:
+        return audio
+
+    lead = _process_vocal_gender(audio, sr, gender)
+    pb_input = _prepare_for_pedalboard(lead)
+
+    adlib_board = Pedalboard(  # type: ignore
+        [
+            HighpassFilter(cutoff_frequency_hz=180.0),
+            PeakFilter(cutoff_frequency_hz=3000.0, gain_db=2.5, q=1.0),
+            HighShelfFilter(cutoff_frequency_hz=11500.0, gain_db=2.0),
+            Saturation(drive_db=5.0),
+            Reverb(
+                room_size=0.5,
+                damping=0.52,
+                wet_level=0.38,
+                dry_level=0.62,
+                width=1.0,
+            ),
+            Delay(
+                delay_seconds=0.36,
+                feedback=0.34,
+                mix=0.32,
+            ),
+            Gain(gain_db=-5.0),
+        ]
+    )
+
+    processed = adlib_board(pb_input, sr)
+    return _restore_shape(processed, lead)
+
+
+def process_vocal_background(audio: np.ndarray, sr: int) -> np.ndarray:
+    return _process_background_gender(audio, sr, "male")
+
+
+def process_vocal_adlib(audio: np.ndarray, sr: int) -> np.ndarray:
+    return _process_adlib_gender(audio, sr, "male")
