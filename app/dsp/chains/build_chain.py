@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 from pedalboard import Pedalboard
@@ -209,12 +209,30 @@ def _map_pitch_to_deesser(pitch_info: Mapping[str, Any] | None, base_freq: float
     return freq, amount
 
 
+def _pick_in_range(bounds: Tuple[float, float], norm: float) -> float:
+    """Return a value within [low, high] based on a 0-1 normalised control.
+
+    The helper is used to map macro controls (Air/Punch/Warmth) and
+    analysis metrics into the safe ranges defined by the preset
+    registry. ``norm`` is clamped to [0,1] for robustness.
+    """
+
+    low, high = bounds
+    t = float(np.clip(norm, 0.0, 1.0))
+    return float(low + (high - low) * t)
+
+
 def build_pedalboard_chain(
     preset_key: str,
     track_type: str,
     analysis: Mapping[str, float] | None,
     pitch_info: Mapping[str, Any] | None,
     genre: Optional[str] = None,
+    preset_ranges: Optional[Mapping[str, Any]] = None,
+    macro_air: Optional[float] = None,
+    macro_punch: Optional[float] = None,
+    macro_warmth: Optional[float] = None,
+    param_snapshot: Optional[Dict[str, Any]] = None,
 ) -> Pedalboard:
     """Build an EQ→Compressor→Saturation→De-esser→Limiter chain.
 
@@ -227,13 +245,69 @@ def build_pedalboard_chain(
     transients = float(analysis.get("transients", 0.5) or 0.5)
     dynamic_range = float(analysis.get("dynamic_range", 10.0) or 10.0)
 
+    # Normalised macro controls; default to 0.5 (neutral) when not provided.
+    air_macro = 0.5 if macro_air is None else float(np.clip(macro_air, 0.0, 1.0))
+    punch_macro = 0.5 if macro_punch is None else float(np.clip(macro_punch, 0.0, 1.0))
+    warmth_macro = 0.5 if macro_warmth is None else float(np.clip(macro_warmth, 0.0, 1.0))
+
+    # --- Base values from analysis ---
     shelf_gain = _map_brightness_to_shelf(brightness_hz, genre)
     attack_ms = _map_transients_to_attack(transients)
     ratio = _map_dynamic_range_to_ratio(dynamic_range, genre, track_type)
     drive_db = _map_pitch_to_saturation(pitch_info, default_drive=4.0)
     deesser_freq, deesser_amount = _map_pitch_to_deesser(pitch_info, base_freq=7200.0)
 
-    # Thresholds tuned for vocal/mix/master context, may be refined per preset.
+    # --- Clamp into preset-defined safe ranges when available ---
+    eq_ranges = (preset_ranges or {}).get("eq") if isinstance(preset_ranges, Mapping) else None
+    comp_ranges = (preset_ranges or {}).get("compression") if isinstance(preset_ranges, Mapping) else None
+    sat_ranges = (preset_ranges or {}).get("saturation") if isinstance(preset_ranges, Mapping) else None
+    deesser_ranges = (preset_ranges or {}).get("deesser") if isinstance(preset_ranges, Mapping) else None
+    limiter_ranges = (preset_ranges or {}).get("limiter") if isinstance(preset_ranges, Mapping) else None
+
+    # High-pass and high-shelf shaping: use Warmth/Air to steer within ranges.
+    hpf_cut = 80.0
+    if isinstance(eq_ranges, Mapping):
+        hpf_bounds = eq_ranges.get("hpf_hz")
+        if isinstance(hpf_bounds, tuple) and len(hpf_bounds) == 2:
+            # Warmer → slightly lower cutoff within safe range.
+            hpf_cut = _pick_in_range(hpf_bounds, 1.0 - warmth_macro)
+
+        shelf_bounds = eq_ranges.get("high_shelf_boost_db")
+        if isinstance(shelf_bounds, tuple) and len(shelf_bounds) == 2:
+            shelf_gain = _pick_in_range(shelf_bounds, air_macro)
+
+    # Compression behaviour: clamp ratio/attack/release into ranges and let
+    # Punch macro lean toward the upper end.
+    if isinstance(comp_ranges, Mapping):
+        ratio_bounds = comp_ranges.get("ratio")
+        if isinstance(ratio_bounds, tuple) and len(ratio_bounds) == 2:
+            # Blend analysis-derived ratio with macro-driven intensity.
+            ratio_from_macro = _pick_in_range(ratio_bounds, punch_macro)
+            ratio = float(np.clip((ratio + ratio_from_macro) * 0.5, ratio_bounds[0], ratio_bounds[1]))
+
+        atk_bounds = comp_ranges.get("attack_ms")
+        if isinstance(atk_bounds, tuple) and len(atk_bounds) == 2:
+            attack_ms = float(np.clip(attack_ms, atk_bounds[0], atk_bounds[1]))
+
+    # Saturation: use Warmth macro within the preset's drive range.
+    if isinstance(sat_ranges, Mapping):
+        drive_bounds = sat_ranges.get("drive_percent")
+        if isinstance(drive_bounds, tuple) and len(drive_bounds) == 2:
+            drive_percent = _pick_in_range(drive_bounds, warmth_macro)
+            # Map roughly percent → dB with conservative cap.
+            drive_db = float(np.clip(drive_percent * 0.6, 0.0, 10.0))
+
+    # De-esser: adjust reduction within safe bounds and let Air macro
+    # slightly reduce de-essing when the user wants more top.
+    if isinstance(deesser_ranges, Mapping):
+        red_bounds = deesser_ranges.get("reduction_db")
+        if isinstance(red_bounds, tuple) and len(red_bounds) == 2:
+            # Less reduction when Air is high, more when low.
+            red_norm = 1.0 - air_macro
+            reduction_db = _pick_in_range(red_bounds, red_norm)
+            deesser_amount = abs(reduction_db) / 4.0  # map dB to a gentle ratio scale
+
+    # Thresholds tuned for vocal/mix/master context, refined by limiter ranges.
     if track_type == "master":
         comp_threshold = -16.0
         limiter_ceiling = -1.0
@@ -244,8 +318,13 @@ def build_pedalboard_chain(
         comp_threshold = -20.0
         limiter_ceiling = -1.0
 
+    if isinstance(limiter_ranges, Mapping):
+        tp_bounds = limiter_ranges.get("true_peak_db")
+        if isinstance(tp_bounds, tuple) and len(tp_bounds) == 2:
+            limiter_ceiling = _pick_in_range(tp_bounds, punch_macro)
+
     plugins: list[Any] = [
-        HighpassFilter(cutoff_frequency_hz=80.0),
+        HighpassFilter(cutoff_frequency_hz=hpf_cut),
         HighShelfFilter(cutoff_frequency_hz=9000.0, gain_db=shelf_gain),
         Compressor(
             threshold_db=comp_threshold,
@@ -265,6 +344,26 @@ def build_pedalboard_chain(
     # Only keep real pedalboard plugins when available.
     plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
     board = Pedalboard(plugins)
+
+    if param_snapshot is not None:
+        param_snapshot.update(
+            {
+                "eq_highpass": {"cutoff_hz": float(hpf_cut)},
+                "eq_high_shelf": {"cutoff_hz": 9000.0, "gain_db": float(shelf_gain)},
+                "compressor": {
+                    "threshold_db": float(comp_threshold),
+                    "ratio": float(ratio),
+                    "attack_ms": float(attack_ms),
+                    "release_ms": 120.0,
+                },
+                "saturation": {"drive_db": float(drive_db)},
+                "deesser": {
+                    "frequency_hz": float(deesser_freq),
+                    "amount": float(deesser_amount),
+                },
+                "limiter": {"ceiling_db": float(limiter_ceiling)},
+            }
+        )
 
     logger.debug(
         "[DSP] Pedalboard chain built: preset=%s track_type=%s shelf=%.2f drive=%.2f ratio=%.2f",
@@ -286,19 +385,29 @@ def process_with_dynamic_chain(
     analysis: Mapping[str, float] | None,
     pitch_info: Mapping[str, Any] | None,
     genre: Optional[str] = None,
-) -> np.ndarray:
+    preset_ranges: Optional[Mapping[str, Any]] = None,
+    macro_air: Optional[float] = None,
+    macro_punch: Optional[float] = None,
+    macro_warmth: Optional[float] = None,
+) -> tuple[np.ndarray, Dict[str, Any]]:
     """High-level helper to build and apply the dynamic Pedalboard chain."""
 
     if audio.size == 0:
-        return audio
+        return audio, {}
 
     pb_input = _prepare_for_pedalboard(audio)
+    params: Dict[str, Any] = {}
     board = build_pedalboard_chain(
         preset_key=preset_key,
         track_type=track_type,
         analysis=analysis,
         pitch_info=pitch_info,
         genre=genre,
+        preset_ranges=preset_ranges,
+        macro_air=macro_air,
+        macro_punch=macro_punch,
+        macro_warmth=macro_warmth,
+        param_snapshot=params,
     )
     processed = board(pb_input, sr)
-    return _restore_shape(processed, audio)
+    return _restore_shape(processed, audio), params
