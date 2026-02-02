@@ -44,7 +44,7 @@ async def analyze(file: UploadFile = File(...)):
 async def process(
     file: UploadFile = File(...),
     track_type: str = Form("vocal"),
-    preset: str = Form("clean_vocal"),
+    preset: str | None = Form(None),
     genre: str | None = Form(None),
     reference_profile: str | None = Form(None),
     target: str | None = Form(None),
@@ -52,6 +52,9 @@ async def process(
     throw_fx_mode: str | None = Form(None),
     session_key: str | None = Form(None),
     session_scale: str | None = Form(None),
+    macro_air: float | None = Form(None),
+    macro_punch: float | None = Form(None),
+    macro_warmth: float | None = Form(None),
 ):
     """Process an uploaded audio file with the given track type + preset.
 
@@ -80,6 +83,9 @@ async def process(
             throw_fx_mode=throw_fx_mode,
             session_key=session_key,
             session_scale=session_scale,
+            macro_air=macro_air,
+            macro_punch=macro_punch,
+            macro_warmth=macro_warmth,
         )
     except Exception as exc:  # pragma: no cover - defensive, logs via HTTP detail
         # Surface a more descriptive error than the default "Internal Server Error"
@@ -95,18 +101,10 @@ async def process(
         mp3_path = None
 
     return {
-        "status": "processed",
-        # Primary output remains the WAV path for backwards compatibility.
-        "output_file": wav_path,
-        # New multi-format map used by the studio for WAV/MP3 downloads.
-        "output_files": {
-            "wav": wav_path,
-            "mp3": mp3_path,
-        },
-        "track_type": track_type,
-        "preset": preset,
-        "genre": genre,
-        "gender": gender,
+        "status": "ok",
+        "wav": wav_path,
+        "mp3": mp3_path,
+        "plugin_params": output_paths.get("plugin_params"),
     }
 
 
