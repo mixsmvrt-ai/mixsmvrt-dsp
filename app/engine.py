@@ -20,7 +20,6 @@ from app.vocal_presets import (
 from app.dsp.analysis.essentia_analysis import analyze_mono_signal
 from app.dsp.analysis.pitch_world import analyze_pitch_world
 from app.dsp.chains.build_chain import process_with_dynamic_chain
-from app.preset_registry import get_preset
 
 
 logger = logging.getLogger(__name__)
@@ -149,9 +148,6 @@ def process_audio(
     throw_fx_mode: str | None = None,
     session_key: str | None = None,
     session_scale: str | None = None,
-    macro_air: float | None = None,
-    macro_punch: float | None = None,
-    macro_warmth: float | None = None,
 ) -> dict[str, str | None]:
     """Run a simple offline DSP chain over the uploaded audio.
 
@@ -220,11 +216,9 @@ def process_audio(
             # for named presets like trap_dancehall, hiphop, etc.
             processed = vocal_processor(audio, sr)
         else:
-            # Generic vocal path: dynamic Pedalboard chain driven by
-            # analysis + WORLD pitch metrics + preset registry ranges.
-            preset_meta = get_preset(preset_name)
-            dsp_ranges = preset_meta.dsp_ranges if preset_meta is not None else None
-            processed, chain_params = process_with_dynamic_chain(
+            # Generic vocal path: upgrade to the dynamic Pedalboard chain
+            # driven by analysis + WORLD pitch metrics.
+            processed = process_with_dynamic_chain(
                 audio=audio,
                 sr=sr,
                 preset_key=preset_name,
@@ -232,10 +226,6 @@ def process_audio(
                 analysis=analysis_features or {},
                 pitch_info=pitch_profile or {},
                 genre=genre,
-                preset_ranges=dsp_ranges,
-                macro_air=macro_air,
-                macro_punch=macro_punch,
-                macro_warmth=macro_warmth,
             )
     else:
         # Non‑vocal tracks: use a dedicated pedalboard-based bus chain for
@@ -247,11 +237,10 @@ def process_audio(
 
             processed = process_beat_or_master(audio, sr, master_overrides)
         else:
-            # For other non-vocal tracks, use the dynamic Pedalboard
-            # chain with preset-aware ranges and macros.
-            preset_meta = get_preset(preset_name)
-            dsp_ranges = preset_meta.dsp_ranges if preset_meta is not None else None
-            processed, chain_params = process_with_dynamic_chain(
+            # For other non-vocal tracks, use the upgraded dynamic
+            # Pedalboard chain, but still allow the backend to hint
+            # whether this should be treated as a dedicated beat bus.
+            processed = process_with_dynamic_chain(
                 audio=audio,
                 sr=sr,
                 preset_key=preset_name,
@@ -259,10 +248,6 @@ def process_audio(
                 analysis=analysis_features or {},
                 pitch_info=None,
                 genre=genre,
-                preset_ranges=dsp_ranges,
-                macro_air=macro_air,
-                macro_punch=macro_punch,
-                macro_warmth=macro_warmth,
             )
 
     # Optional throw FX for vocals – applied after the core vocal chain so
@@ -302,16 +287,4 @@ def process_audio(
 
     logger.debug("[DSP] Processing finished: wav=%s mp3=%s", wav_url_or_path, mp3_url_or_path)
 
-    # Optionally surface chain_params for generic dynamic-chain paths so the
-    # Studio can hydrate AI plugin UIs with the actual values chosen within
-    # each preset's safe ranges. Genre-specific vocal chains and the
-    # beat/master bus keep their own internal presets.
-    result: dict[str, str | None] = {"wav": wav_url_or_path, "mp3": mp3_url_or_path}
-    try:
-        # ``chain_params`` is only defined on the dynamic-chain branches.
-        if "chain_params" in locals() and isinstance(chain_params, dict):  # type: ignore[name-defined]
-            result["plugin_params"] = chain_params  # type: ignore[assignment]
-    except Exception:
-        pass
-
-    return result
+    return {"wav": wav_url_or_path, "mp3": mp3_url_or_path}
