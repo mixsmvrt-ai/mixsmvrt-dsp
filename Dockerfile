@@ -4,13 +4,13 @@ FROM python:3.11-slim
 
 # System deps for audio/DSP stack: ffmpeg, libsndfile, etc.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       ffmpeg \
-       libsndfile1 \
-       libsamplerate0 \
-       libfftw3-3 \
-       libyaml-0-2 \
-    && rm -rf /var/lib/apt/lists/*
+     && apt-get install -y --no-install-recommends \
+         ffmpeg \
+         libsndfile1 \
+         libsamplerate0 \
+         libfftw3-single3 \
+         libyaml-0-2 \
+     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
