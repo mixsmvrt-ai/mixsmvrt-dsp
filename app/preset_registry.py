@@ -152,6 +152,107 @@ GENRE_VOCAL_PRESETS: List[PresetMeta] = [
         description="Reggaeton vocal chain (routes to afrobeat/reggaeton tuning).",
         genre="reggaeton",
     ),
+    # Background and adlib variants for key genres. These map directly
+    # to the *_bg / *_adlib entries in VOCAL_GENRE_PROCESSORS in
+    # app.engine so that each role (lead, BG, adlib) has its own
+    # explicitly named preset instead of being hidden inside a single
+    # generic preset.
+    PresetMeta(
+        key="trap_dancehall_bg",
+        name="Trap Dancehall BG Vox",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Background vocal stack tuned for trap dancehall mixes.",
+        genre="trap_dancehall",
+    ),
+    PresetMeta(
+        key="trap_dancehall_adlib",
+        name="Trap Dancehall Adlibs",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Hyped adlib chain for trap dancehall vocals.",
+        genre="trap_dancehall",
+    ),
+    PresetMeta(
+        key="hiphop_bg",
+        name="Hip-Hop BG Vox",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Glue-style backing vocals for hip-hop.",
+        genre="hiphop",
+    ),
+    PresetMeta(
+        key="hiphop_adlib",
+        name="Hip-Hop Adlibs",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Brighter, more aggressive hip-hop adlib chain.",
+        genre="hiphop",
+    ),
+    PresetMeta(
+        key="afrobeat_bg",
+        name="Afrobeat BG Vox",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Smooth background stacks for afrobeat.",
+        genre="afrobeat",
+    ),
+    PresetMeta(
+        key="afrobeat_adlib",
+        name="Afrobeat Adlibs",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Wide, characterful afrobeat adlibs.",
+        genre="afrobeat",
+    ),
+    PresetMeta(
+        key="rnb_bg",
+        name="R&B BG Vox",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Soft, wide background vocals for R&B.",
+        genre="rnb",
+    ),
+    PresetMeta(
+        key="rnb_adlib",
+        name="R&B Adlibs",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Expressive R&B adlib chain with extra space.",
+        genre="rnb",
+    ),
+    PresetMeta(
+        key="reggae_bg",
+        name="Reggae BG Vox",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Warm, supporting background vocals for reggae.",
+        genre="reggae",
+    ),
+    PresetMeta(
+        key="reggae_adlib",
+        name="Reggae Adlibs",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Echo-friendly reggae adlib chain.",
+        genre="reggae",
+    ),
+    PresetMeta(
+        key="rap_bg",
+        name="Rap BG Vox",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Supporting rap backgrounds that sit under the lead.",
+        genre="rap",
+    ),
+    PresetMeta(
+        key="rap_adlib",
+        name="Rap Adlibs",
+        kind="vocal",
+        chain_type="genre_vocal",
+        description="Punchy, hyped rap adlib chain.",
+        genre="rap",
+    ),
 ]
 
 
