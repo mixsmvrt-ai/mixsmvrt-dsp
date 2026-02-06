@@ -10,6 +10,7 @@ RUN apt-get update \
          libsamplerate0 \
          libfftw3-single3 \
          libyaml-0-2 \
+         g++ \
      && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
