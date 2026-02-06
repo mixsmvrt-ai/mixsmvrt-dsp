@@ -52,6 +52,7 @@ async def process(
     throw_fx_mode: str | None = Form(None),
     session_key: str | None = Form(None),
     session_scale: str | None = Form(None),
+    plugin_chain: str | None = Form(None),
 ):
     """Process an uploaded audio file with the given track type + preset.
 
@@ -68,6 +69,13 @@ async def process(
         except Exception:  # pragma: no cover - defensive parsing
             overrides_dict = None
 
+    plugin_chain_overrides = None
+    if plugin_chain:
+        try:
+            plugin_chain_overrides = json.loads(plugin_chain)
+        except Exception:  # pragma: no cover - defensive parsing
+            plugin_chain_overrides = None
+
     try:
         output_paths = process_audio(
             file,
@@ -80,6 +88,7 @@ async def process(
             throw_fx_mode=throw_fx_mode,
             session_key=session_key,
             session_scale=session_scale,
+            plugin_chain=plugin_chain_overrides,
         )
     except Exception as exc:  # pragma: no cover - defensive, logs via HTTP detail
         # Surface a more descriptive error than the default "Internal Server Error"

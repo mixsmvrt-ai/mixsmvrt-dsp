@@ -148,6 +148,7 @@ def process_audio(
     throw_fx_mode: str | None = None,
     session_key: str | None = None,
     session_scale: str | None = None,
+    plugin_chain: dict | None = None,
 ) -> dict[str, str | None]:
     """Run a simple offline DSP chain over the uploaded audio.
 
