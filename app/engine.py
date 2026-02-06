@@ -2,9 +2,11 @@ import logging
 import tempfile
 import subprocess
 
+import numpy as np
 import soundfile as sf
 
 from app.beat_mastering import process_beat_or_master
+from app.processors.loudness import measure_loudness
 from app.storage import upload_file_to_s3
 from app.throw_fx import apply_throw_fx_to_vocal
 from app.vocal_presets.tuning import apply_pitch_correction
@@ -149,7 +151,10 @@ def process_audio(
     session_key: str | None = None,
     session_scale: str | None = None,
     plugin_chain: dict | None = None,
-) -> dict[str, str | None]:
+    job_id: str | None = None,
+    track_id: str | None = None,
+    track_role: str | None = None,
+) -> dict:
     """Run a simple offline DSP chain over the uploaded audio.
 
     - Reads the uploaded file via soundfile
@@ -251,10 +256,34 @@ def process_audio(
                 genre=genre,
             )
 
-    # Optional throw FX for vocals – applied after the core vocal chain so
+    # Optional throw FX for vocals  applied after the core vocal chain so
     # throws sit around the already-shaped vocal.
     if track_type == "vocal" and throw_fx_mode:
         processed = apply_throw_fx_to_vocal(processed, sr, throw_fx_mode)
+
+    # ---------------------------------
+    # 2b) MEASUREMENT LAYER (loudness + peaks)
+    # ---------------------------------
+    lufs_value: float | None = None
+    true_peak_value: float | None = None
+
+    try:
+        if processed.size:
+            # Collapse to mono for integrated loudness while keeping
+            # stereo imaging intact for rendering.
+            if processed.ndim == 1:
+                mono_for_loudness = processed.astype(np.float32)
+            else:
+                # Detect channels-first vs channels-last layout
+                if processed.shape[0] <= processed.shape[1]:
+                    mono_for_loudness = processed.mean(axis=0).astype(np.float32)
+                else:
+                    mono_for_loudness = processed.mean(axis=1).astype(np.float32)
+
+            lufs_value = float(measure_loudness(mono_for_loudness, sr))
+            true_peak_value = float(np.max(np.abs(processed.astype(np.float32))))
+    except Exception as exc:  # pragma: no cover - defensive path
+        logger.warning("[DSP] Loudness/peak measurement failed: %s", exc)
 
     # ---------------------------------
     # 3) FINALISATION LAYER (render + export)
@@ -286,6 +315,115 @@ def process_audio(
     except Exception:
         mp3_url_or_path = None
 
-    logger.debug("[DSP] Processing finished: wav=%s mp3=%s", wav_url_or_path, mp3_url_or_path)
+    result: dict = {"wav": wav_url_or_path, "mp3": mp3_url_or_path}
 
-    return {"wav": wav_url_or_path, "mp3": mp3_url_or_path}
+    # Attach metrics and context for callers that care about them while
+    # keeping the original keys for backwards compatibility.
+    if lufs_value is not None:
+        result["lufs"] = lufs_value
+    if true_peak_value is not None:
+        result["true_peak"] = true_peak_value
+    if plugin_chain is not None:
+        result["plugin_chain"] = plugin_chain
+    if target is not None:
+        result["target"] = target
+    if track_role is not None:
+        result["track_role"] = track_role
+    if job_id is not None:
+        result["job_id"] = job_id
+    if track_id is not None:
+        result["track_id"] = track_id
+
+    logger.info(
+        "[DSP] Processing finished job_id=%s track_id=%s track_type=%s role=%s preset=%s genre=%s lufs=%s true_peak=%s wav=%s mp3=%s",
+        job_id,
+        track_id,
+        track_type,
+        track_role,
+        preset_name,
+        genre,
+        lufs_value,
+        true_peak_value,
+        wav_url_or_path,
+        mp3_url_or_path,
+    )
+
+    return result
+
+
+def process_track(
+    audio_path: str,
+    track_role: str,
+    preset: str,
+    *,
+    track_type: str | None = None,
+    genre: str | None = None,
+    gender: str | None = None,
+    reference_overrides: dict | None = None,
+    target: str | None = None,
+    throw_fx_mode: str | None = None,
+    session_key: str | None = None,
+    session_scale: str | None = None,
+    plugin_chain: dict | None = None,
+    job_id: str | None = None,
+    track_id: str | None = None,
+) -> dict:
+    """Convenience entry point for single-track processing by file path.
+
+    This wraps ``process_audio`` so other Python callers can work with the
+    same engine using a simple (audio_path, track_role, preset) API.
+    """
+
+    normalized_role = (track_role or "").lower()
+
+    inferred_type = track_type
+    if not inferred_type:
+        if "beat" in normalized_role:
+            inferred_type = "beat"
+        elif "master" in normalized_role:
+            inferred_type = "master"
+        else:
+            # Default to vocal-style processing for all other roles
+            inferred_type = "vocal"
+
+    class _FileLike:
+        def __init__(self, path: str) -> None:
+            self._fh = open(path, "rb")
+            self.file = self._fh
+
+        def close(self) -> None:
+            try:
+                self._fh.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    wrapper = _FileLike(audio_path)
+    try:
+        raw_result = process_audio(
+            file=wrapper,
+            track_type=inferred_type,
+            preset_name=preset,
+            genre=genre,
+            gender=gender,
+            reference_overrides=reference_overrides,
+            target=target,
+            throw_fx_mode=throw_fx_mode,
+            session_key=session_key,
+            session_scale=session_scale,
+            plugin_chain=plugin_chain,
+            job_id=job_id,
+            track_id=track_id,
+            track_role=track_role,
+        )
+    finally:
+        wrapper.close()
+
+    processed_audio_path = raw_result.get("wav") or raw_result.get("output_file")
+
+    return {
+        "track_id": track_id,
+        "processed_audio_path": processed_audio_path,
+        "plugin_chain": raw_result.get("plugin_chain"),
+        "lufs": raw_result.get("lufs"),
+        "true_peak": raw_result.get("true_peak"),
+    }

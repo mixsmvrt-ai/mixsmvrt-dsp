@@ -53,6 +53,9 @@ async def process(
     session_key: str | None = Form(None),
     session_scale: str | None = Form(None),
     plugin_chain: str | None = Form(None),
+    job_id: str | None = Form(None),
+    track_id: str | None = Form(None),
+    track_role: str | None = Form(None),
 ):
     """Process an uploaded audio file with the given track type + preset.
 
@@ -89,6 +92,9 @@ async def process(
             session_key=session_key,
             session_scale=session_scale,
             plugin_chain=plugin_chain_overrides,
+            job_id=job_id,
+            track_id=track_id,
+            track_role=track_role,
         )
     except Exception as exc:  # pragma: no cover - defensive, logs via HTTP detail
         # Surface a more descriptive error than the default "Internal Server Error"
@@ -103,7 +109,7 @@ async def process(
         wav_path = output_paths
         mp3_path = None
 
-    return {
+    response = {
         "status": "processed",
         # Primary output remains the WAV path for backwards compatibility.
         "output_file": wav_path,
@@ -117,6 +123,23 @@ async def process(
         "genre": genre,
         "gender": gender,
     }
+
+    # Surface optional metrics and context if the engine provided them.
+    if isinstance(output_paths, dict):
+        if "lufs" in output_paths:
+            response["lufs"] = output_paths.get("lufs")
+        if "true_peak" in output_paths:
+            response["true_peak"] = output_paths.get("true_peak")
+        if "plugin_chain" in output_paths:
+            response["plugin_chain"] = output_paths.get("plugin_chain")
+        if "job_id" in output_paths:
+            response["job_id"] = output_paths.get("job_id")
+        if "track_id" in output_paths:
+            response["track_id"] = output_paths.get("track_id")
+        if "track_role" in output_paths:
+            response["track_role"] = output_paths.get("track_role")
+
+    return response
 
 
 @app.get("/presets")
