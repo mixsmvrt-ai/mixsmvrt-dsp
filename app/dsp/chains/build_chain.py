@@ -7,13 +7,13 @@ import numpy as np
 from pedalboard import Pedalboard
 
 try:
-    from pedalboard import (
-        HighpassFilter,
-        HighShelfFilter,
-        Compressor,
-        Saturation,
-        Deesser,
-        Limiter,
+    from pedalboard import (  # type: ignore
+        HighpassFilter,  # type: ignore
+        HighShelfFilter,  # type: ignore
+        Compressor,  # type: ignore
+        Saturation,  # type: ignore
+        Deesser,  # type: ignore
+        Limiter,  # type: ignore
     )  # type: ignore
 except Exception:  # pragma: no cover - lightweight fallbacks for environments
     class HighpassFilter:  # type: ignore[override]
