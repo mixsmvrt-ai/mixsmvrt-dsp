@@ -256,6 +256,20 @@ def process_audio(
                 genre=genre,
             )
 
+    # ---------------------------------
+    # 1c) SAFETY LAYER (sanity & peak guard)
+    # ---------------------------------
+    # Ensure the processed signal is finite and not wildly clipped before
+    # any further processing/export. This helps avoid harsh static or
+    # intermittent distortion caused by NaNs/Infs or extreme gains in
+    # individual presets.
+    if isinstance(processed, np.ndarray) and processed.size:
+        processed = np.nan_to_num(processed.astype(np.float32), nan=0.0, posinf=0.0, neginf=0.0)
+        peak = float(np.max(np.abs(processed)))
+        if np.isfinite(peak) and peak > 1.0:
+            # Soft-clip by normalising down to just under full scale.
+            processed = processed / (peak * 1.01)
+
     # Optional throw FX for vocals  applied after the core vocal chain so
     # throws sit around the already-shaped vocal.
     if track_type == "vocal" and throw_fx_mode:
