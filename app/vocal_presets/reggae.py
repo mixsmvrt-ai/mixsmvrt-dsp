@@ -4,27 +4,27 @@ from __future__ import annotations
 
 import numpy as np
 import pyloudnorm as pyln
-from pedalboard import Pedalboard
+from pedalboard import Pedalboard, Plugin
 
 try:
     from pedalboard import Gain  # type: ignore
 except Exception:
-    class Gain:
+    class Gain(Plugin):
         def __init__(self, gain_db: float = 0.0, **kwargs) -> None:
             self.gain = gain_db
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             factor = 10.0 ** (self.gain / 20.0)
             return audio * factor
 
 try:
     from pedalboard import HighpassFilter  # type: ignore
 except Exception:
-    class HighpassFilter:
+    class HighpassFilter(Plugin):
         def __init__(self, cutoff_frequency_hz: float = 80.0, **kwargs) -> None:
             self.cutoff = cutoff_frequency_hz
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             import numpy as _np
             rc = 1.0 / (2 * _np.pi * self.cutoff)
             dt = 1.0 / float(sample_rate)
@@ -38,12 +38,12 @@ except Exception:
 try:
     from pedalboard import Compressor  # type: ignore
 except Exception:
-    class Compressor:
+    class Compressor(Plugin):
         def __init__(self, threshold_db: float = -18.0, ratio: float = 2.0, **kwargs) -> None:
             self.threshold = threshold_db
             self.ratio = ratio
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             import numpy as _np
             threshold_lin = 10.0 ** (self.threshold / 20.0)
             mag = _np.abs(audio)
@@ -52,38 +52,13 @@ except Exception:
             return audio * gain
 
 try:
-    from pedalboard import Deesser  # type: ignore
-except Exception:
-    class Deesser:
-        """Fallback De-Esser used when pedalboard's Deesser is unavailable.
-
-        This implementation is intentionally conservative and leaves the
-        signal unchanged rather than risking artifacts.
-        """
-
-        def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
-            self.frequency = frequency
-            self.threshold_db = threshold_db
-            self.ratio = ratio
-
-        def __call__(self, audio, sample_rate):
-            return audio
-            self.threshold = 10.0 ** (threshold_db / 20.0)
-
-        def __call__(self, audio, sample_rate):
-            import numpy as _np
-            mag = _np.abs(audio)
-            mask = mag >= self.threshold
-            return audio * mask
-
-try:
     from pedalboard import PeakFilter, HighShelfFilter, LowShelfFilter  # type: ignore
 except Exception:
-    class PeakFilter:
+    class PeakFilter(Plugin):
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             return audio
 
     class HighShelfFilter(PeakFilter):
@@ -95,13 +70,13 @@ except Exception:
 try:
     from pedalboard import Saturation  # type: ignore
 except Exception:
-    class Saturation:
+    class Saturation(Plugin):
         """Fallback saturation using soft clipping."""
 
         def __init__(self, drive_db: float = 0.0, **kwargs) -> None:
             self.drive = drive_db
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             import numpy as _np
             gain = 10.0 ** (self.drive / 20.0)
             return _np.tanh(audio * gain)
@@ -109,24 +84,24 @@ except Exception:
 try:
     from pedalboard import Reverb, Delay  # type: ignore
 except Exception:
-    class Reverb:
+    class Reverb(Plugin):
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             return audio
 
-    class Delay:
+    class Delay(Plugin):
         def __init__(self, *args, **kwargs) -> None:
             pass
 
-        def __call__(self, audio, sample_rate):
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
             return audio
 
 try:
     from pedalboard import Deesser  # type: ignore
 except Exception:
-    class Deesser:
+    class Deesser(Plugin):
         """Fallback De-Esser using a gentle high-shelf cut as approximation."""
 
         def __init__(
@@ -141,12 +116,45 @@ except Exception:
             self.ratio = ratio
             self._board = Pedalboard(  # type: ignore
                 [
-                    HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
+                    HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),  # type: ignore
                 ]
             )
 
-        def __call__(self, audio, sample_rate):
-            return self._board(audio, sample_rate)
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
+            return self._board(audio, sample_rate, buffer_size, reset)
+
+try:
+    from pedalboard import NoiseGate  # type: ignore
+except Exception:
+    class NoiseGate(Plugin):
+        """Fallback Noise Gate using simple thresholding."""
+
+        def __init__(self, threshold_db: float = -56.0, ratio: float = 1.6, release_ms: float = 210.0, **kwargs) -> None:
+            self.threshold = threshold_db
+            self.ratio = ratio
+            self.release_ms = release_ms
+
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
+            import numpy as _np
+            threshold_lin = 10.0 ** (self.threshold / 20.0)
+            mag = _np.abs(audio)
+            mask = (mag > threshold_lin).astype(float)
+            return audio * mask
+
+try:
+    from pedalboard import Limiter  # type: ignore
+except Exception:
+    class Limiter(Plugin):
+        """Fallback Limiter using simple hard clipping."""
+
+        def __init__(self, threshold_db: float = -1.8, release_ms: float = 170.0, **kwargs) -> None:
+            self.threshold = threshold_db
+            self.release_ms = release_ms
+
+        def __call__(self, audio, sample_rate, buffer_size: int = 8192, reset: bool = True):
+            import numpy as _np
+            threshold_lin = 10.0 ** (self.threshold / 20.0)
+            return _np.clip(audio, -threshold_lin, threshold_lin)
 
 from .tuning import apply_pitch_correction
 
@@ -256,7 +264,7 @@ def _process_vocal_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     ]
 
     plugins = [p for p in plugins if p.__class__.__module__.startswith("pedalboard")]
-    board = Pedalboard(plugins)  # type: ignore
+    board = Pedalboard(plugins)  # type: ignore  # noqa: type-ignore
     processed = board(pb_input, sr)
     return _restore_shape(processed, audio)
 
@@ -303,7 +311,7 @@ def _process_background_gender(audio: np.ndarray, sr: int, gender: str | None) -
             ),
             Gain(gain_db=-4.0),
         ]
-    )
+    )  # type: ignore
 
     processed = bg_board(pb_input, sr)
     return _restore_shape(processed, lead)
@@ -337,7 +345,7 @@ def _process_adlib_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
             ),
             Gain(gain_db=-5.0),
         ]
-    )
+    )  # type: ignore
 
     processed = adlib_board(pb_input, sr)
     return _restore_shape(processed, lead)
