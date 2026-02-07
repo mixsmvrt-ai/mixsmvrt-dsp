@@ -65,18 +65,18 @@ def analyze_audio(file):
 
     rms = float(np.sqrt(np.mean(y ** 2)))
     peak = float(np.max(np.abs(y)))
-    duration = float(librosa.get_duration(y=y, sr=sr))
+    duration = float(librosa.get_duration(y=y, sr=int(sr)))
 
     # Integrated loudness in LUFS.
-    lufs = measure_loudness(y, sr)
+    lufs = measure_loudness(y, int(sr))
 
     # Crude tonal brightness via spectral centroid.
     centroid = float(librosa.feature.spectral_centroid(y=y, sr=sr).mean())
 
     # Tier-1 analysis: Essentia + WORLD (with safe fallbacks when
     # libraries are not available at runtime).
-    essentia_features = analyze_mono_signal(y, sr)
-    pitch_profile = analyze_pitch_world(y, sr)
+    essentia_features = analyze_mono_signal(y, int(sr))
+    pitch_profile = analyze_pitch_world(y, int(sr))
 
     preset_overrides = _build_preset_overrides(lufs, centroid)
 
