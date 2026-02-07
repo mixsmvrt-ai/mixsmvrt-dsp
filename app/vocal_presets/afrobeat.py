@@ -299,26 +299,31 @@ def _process_background_gender(audio: np.ndarray, sr: int, gender: str | None) -
     lead = _process_vocal_gender(audio, sr, gender)
     pb_input = _prepare_for_pedalboard(lead)
 
-    bg_board = Pedalboard(  # type: ignore
-        [
-            HighpassFilter(cutoff_frequency_hz=165.0),
-            LowShelfFilter(cutoff_frequency_hz=210.0, gain_db=-2.0),
-            HighShelfFilter(cutoff_frequency_hz=10500.0, gain_db=-0.5),
-            Reverb(
-                room_size=0.38,
-                damping=0.48,
-                wet_level=0.3,
-                dry_level=0.7,
-                width=1.0,
-            ),
-            Delay(
-                delay_seconds=0.3,
-                feedback=0.3,
-                mix=0.26,
-            ),
-            Gain(gain_db=-4.0),
-        ]
-    )
+    bg_plugins = [
+        HighpassFilter(cutoff_frequency_hz=165.0),
+        LowShelfFilter(cutoff_frequency_hz=210.0, gain_db=-2.0),
+        HighShelfFilter(cutoff_frequency_hz=10500.0, gain_db=-0.5),
+        Reverb(
+            room_size=0.38,
+            damping=0.48,
+            wet_level=0.3,
+            dry_level=0.7,
+            width=1.0,
+        ),
+        Delay(
+            delay_seconds=0.3,
+            feedback=0.3,
+            mix=0.26,
+        ),
+        Gain(gain_db=-4.0),
+    ]
+
+    # Filter out any local fallback processors that are not real
+    # pedalboard-native plugins to avoid Chain() type errors.
+    bg_plugins = [
+        p for p in bg_plugins if p.__class__.__module__.startswith("pedalboard")
+    ]
+    bg_board = Pedalboard(bg_plugins)  # type: ignore
 
     processed = bg_board(pb_input, sr)
     return _restore_shape(processed, lead)
@@ -332,27 +337,33 @@ def _process_adlib_gender(audio: np.ndarray, sr: int, gender: str | None) -> np.
     lead = _process_vocal_gender(audio, sr, gender)
     pb_input = _prepare_for_pedalboard(lead)
 
-    adlib_board = Pedalboard(  # type: ignore
-        [
-            HighpassFilter(cutoff_frequency_hz=185.0),
-            PeakFilter(cutoff_frequency_hz=3100.0, gain_db=2.5, q=1.0),
-            HighShelfFilter(cutoff_frequency_hz=12000.0, gain_db=2.0),
-            Saturation(drive_db=5.0),
-            Reverb(
-                room_size=0.48,
-                damping=0.5,
-                wet_level=0.36,
-                dry_level=0.64,
-                width=1.0,
-            ),
-            Delay(
-                delay_seconds=0.34,
-                feedback=0.32,
-                mix=0.32,
-            ),
-            Gain(gain_db=-5.0),
-        ]
-    )
+    adlib_plugins = [
+        HighpassFilter(cutoff_frequency_hz=185.0),
+        PeakFilter(cutoff_frequency_hz=3100.0, gain_db=2.5, q=1.0),
+        HighShelfFilter(cutoff_frequency_hz=12000.0, gain_db=2.0),
+        Saturation(drive_db=5.0),
+        Reverb(
+            room_size=0.48,
+            damping=0.5,
+            wet_level=0.36,
+            dry_level=0.64,
+            width=1.0,
+        ),
+        Delay(
+            delay_seconds=0.34,
+            feedback=0.32,
+            mix=0.32,
+        ),
+        Gain(gain_db=-5.0),
+    ]
+
+    # Filter out any local fallback processors that are not real
+    # pedalboard-native plugins to avoid Chain() type errors when the
+    # deployed pedalboard build lacks certain modules (e.g. Saturation).
+    adlib_plugins = [
+        p for p in adlib_plugins if p.__class__.__module__.startswith("pedalboard")
+    ]
+    adlib_board = Pedalboard(adlib_plugins)  # type: ignore
 
     processed = adlib_board(pb_input, sr)
     return _restore_shape(processed, lead)
