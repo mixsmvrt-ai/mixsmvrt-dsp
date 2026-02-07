@@ -155,8 +155,10 @@ def process_beat_or_master(audio: np.ndarray, sr: int, overrides: dict | None = 
     if overrides and isinstance(overrides, dict):
         comp_cfg = overrides.get("compressor") or {}
         try:
-            th = float(comp_cfg.get("threshold"))
-            base_comp_threshold = th
+            th_value = comp_cfg.get("threshold")
+            if th_value is not None:
+                th = float(th_value)
+                base_comp_threshold = th
         except (TypeError, ValueError):
             pass
 
