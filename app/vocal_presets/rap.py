@@ -146,11 +146,11 @@ except Exception:
             return self._board(audio, sample_rate)
 
 from .tuning import apply_pitch_correction
-
-
-def _pre_loudness_normalize(audio: np.ndarray, sr: int, target_lufs: float = -17.5) -> np.ndarray:
-    """Normalize input to a slightly hotter loudness for hard rap.
-
+                    self._board = Pedalboard(  # type: ignore[arg-type]
+                        [
+                            HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
+                        ]
+                    )
     Rap often wants denser, more in‑your‑face vocals.
     """
     if audio.ndim == 1:

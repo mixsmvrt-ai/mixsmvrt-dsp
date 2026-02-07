@@ -142,7 +142,7 @@ except Exception:
             self.frequency = frequency
             self.threshold_db = threshold_db
             self.ratio = ratio
-            self._board = Pedalboard(  # type: ignore
+            self._board = Pedalboard(  # type: ignore[arg-type]
                 [
                     HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
                 ]

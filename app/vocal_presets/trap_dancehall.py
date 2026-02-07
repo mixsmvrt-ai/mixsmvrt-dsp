@@ -148,11 +148,11 @@ except Exception:
             return self._board(audio, sample_rate)
 
 from .tuning import apply_pitch_correction
-
-
-def _pre_loudness_normalize(audio: np.ndarray, sr: int, target_lufs: float = -18.0) -> np.ndarray:
-    """Normalize input to a consistent loudness before dynamics."""
-    if audio.ndim == 1:
+                    self._board = Pedalboard(  # type: ignore[arg-type]
+                        [
+                            HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
+                        ]
+                    )
         mono = audio.astype(np.float32)
     else:
         mono = audio.mean(axis=0).astype(np.float32) if audio.shape[0] < audio.shape[1] else audio.mean(axis=1).astype(np.float32)
