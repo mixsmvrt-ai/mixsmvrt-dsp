@@ -52,21 +52,22 @@ except Exception:
             return audio * gain
 
 try:
-    from pedalboard import Limiter  # type: ignore
+    from pedalboard import Deesser  # type: ignore
 except Exception:
-    class Limiter:
-        def __init__(self, threshold_db: float = -1.0, **kwargs) -> None:
-            self.threshold = 10.0 ** (threshold_db / 20.0)
+    class Deesser:
+        """Fallback De-Esser used when pedalboard's Deesser is unavailable.
+
+        This implementation is intentionally conservative and leaves the
+        signal unchanged rather than risking artifacts.
+        """
+
+        def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
+            self.frequency = frequency
+            self.threshold_db = threshold_db
+            self.ratio = ratio
 
         def __call__(self, audio, sample_rate):
-            import numpy as _np
-            return _np.clip(audio, -self.threshold, self.threshold)
-
-try:
-    from pedalboard import NoiseGate  # type: ignore
-except Exception:
-    class NoiseGate:
-        def __init__(self, threshold_db: float = -60.0, **kwargs) -> None:
+            return audio
             self.threshold = 10.0 ** (threshold_db / 20.0)
 
         def __call__(self, audio, sample_rate):

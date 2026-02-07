@@ -124,18 +124,19 @@ try:
     from pedalboard import Deesser  # type: ignore
 except Exception:
     class Deesser:
-        """Fallback De-Esser using a gentle high-shelf cut as approximation."""
+        """Fallback De-Esser used when pedalboard's Deesser is unavailable.
+
+        This implementation is intentionally conservative and leaves the
+        signal unchanged rather than risking artifacts.
+        """
 
         def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
             self.frequency = frequency
             self.threshold_db = threshold_db
             self.ratio = ratio
-            self._board = Pedalboard([
-                HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
-            ])
 
         def __call__(self, audio, sample_rate):
-            return self._board(audio, sample_rate)
+            return audio
 
 from .tuning import apply_pitch_correction
 

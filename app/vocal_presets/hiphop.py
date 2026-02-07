@@ -13,22 +13,23 @@ except Exception:
         """Fallback De-Esser using a gentle high-shelf cut as approximation."""
 
         def __init__(
-            self,
-            frequency: float = 7000.0,
-            threshold_db: float = -30.0,
-            ratio: float = 3.0,
-            **kwargs,
-        ) -> None:
-            self.frequency = frequency
-            self.threshold_db = threshold_db
-            self.ratio = ratio
-            # In the fallback path we don't care about exact pedalboard typing,
-            # so we ignore type checking here.
-            self._board = Pedalboard(  # type: ignore
-                [
-                    HighShelfFilter(cutoff_frequency_hz=self.frequency, gain_db=-3.0),
-                ]
-            )
+            try:
+                from pedalboard import Deesser  # type: ignore
+            except Exception:
+                class Deesser:
+                    """Fallback De-Esser used when pedalboard's Deesser is unavailable.
+
+                    This implementation is intentionally conservative and leaves the
+                    signal unchanged rather than risking artifacts.
+                    """
+
+                    def __init__(self, frequency: float = 7000.0, threshold_db: float = -30.0, ratio: float = 3.0, **kwargs) -> None:
+                        self.frequency = frequency
+                        self.threshold_db = threshold_db
+                        self.ratio = ratio
+
+                    def __call__(self, audio, sample_rate):
+                        return audio
 
         def __call__(self, audio, sample_rate):
             return self._board(audio, sample_rate)
