@@ -1,7 +1,8 @@
 import json
 from dataclasses import asdict
-from typing import Optional
+from typing import Optional, Any, Dict
 
+import logging
 import soundfile as sf
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,8 @@ from app.dsp.analysis.intelligent_mixing import (
     TrackRole,
     FeatureFlow,
 )
+
+logger = logging.getLogger("mixsmvrt_dsp")
 
 app = FastAPI(title="MixSmvrt DSP Engine")
 
@@ -182,6 +185,7 @@ async def process(
         except Exception:  # pragma: no cover - defensive parsing
             plugin_chain_overrides = None
 
+    output_paths: Dict[str, Any] | str
     try:
         output_paths = process_audio(
             file,
@@ -199,10 +203,39 @@ async def process(
             track_id=track_id,
             track_role=track_role,
         )
+    except MemoryError as exc:  # pragma: no cover - defensive
+        # Explicitly surface out-of-memory conditions so orchestrators can
+        # distinguish them from generic DSP failures.
+        logger.exception("[DSP] MemoryError while processing job_id=%s track_id=%s", job_id, track_id)
+        detail: Dict[str, Any] = {
+            "error": "DSP_MEMORY_ERROR",
+            "message": str(exc),
+        }
+        if job_id is not None:
+            detail["job_id"] = job_id
+        if track_id is not None:
+            detail["track_id"] = track_id
+        raise HTTPException(status_code=500, detail=detail) from exc
     except Exception as exc:  # pragma: no cover - defensive, logs via HTTP detail
         # Surface a more descriptive error than the default "Internal Server Error"
         # so upstream services and the studio UI can see what went wrong.
-        raise HTTPException(status_code=500, detail=f"DSP processing failed: {exc}") from exc
+        logger.exception("[DSP] Processing failed job_id=%s track_id=%s: %s", job_id, track_id, exc)
+        detail = {
+            "error": "DSP_PROCESSING_FAILED",
+            "message": str(exc),
+        }
+        if job_id is not None:
+            detail["job_id"] = job_id
+        if track_id is not None:
+            detail["track_id"] = track_id
+        raise HTTPException(status_code=500, detail=detail) from exc
+    finally:
+        # Ensure file handles are released promptly so each request only
+        # consumes memory for the lifetime of a single track.
+        try:
+            file.file.close()
+        except Exception:  # pragma: no cover - best effort
+            pass
     # Normalise outputs so callers always have a primary output_file (WAV)
     # while also exposing a richer output_files map for multi-format exports.
     if isinstance(output_paths, dict):
