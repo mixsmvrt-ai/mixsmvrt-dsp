@@ -22,6 +22,12 @@ from app.vocal_presets import (
 from app.dsp.analysis.essentia_analysis import analyze_mono_signal
 from app.dsp.analysis.pitch_world import analyze_pitch_world
 from app.dsp.chains.build_chain import process_with_dynamic_chain
+from app.dsp.analysis.intelligent_mixing import (
+    analyze_track_and_suggest_chain,
+    GenreKey,
+    TrackRole,
+    FeatureFlow,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -172,12 +178,72 @@ def process_audio(
     # ---------------------------------
     analysis_features = None
     pitch_profile = None
+    intelligent_analysis: dict | None = None
 
     try:
         analysis_features = analyze_mono_signal(audio, sr)
         logger.debug("[DSP] Analysis completed: %s", analysis_features)
     except Exception as exc:  # pragma: no cover - defensive path
         logger.warning("[DSP] Analysis failed (Essentia/numpy): %s", exc)
+
+    # High-level intelligent analysis + plugin suggestions for the
+    # Studio UI and processing_jobs table. This is non-destructive and
+    # does not alter the DSP chain; it only returns analysis metadata
+    # and an AI-suggested plugin_chain.
+    try:
+        # Infer a TrackRole from the incoming track_type / track_role.
+        normalized_role: TrackRole
+        role_key = (track_role or track_type or "").lower().strip()
+        if track_type == "beat" or "beat" in role_key:
+            normalized_role = "beat"
+        elif any(key in role_key for key in ["bg", "background"]):
+            normalized_role = "vocal_bg"
+        elif "adlib" in role_key:
+            normalized_role = "vocal_adlib"
+        else:
+            normalized_role = "vocal_lead"
+
+        # Map free-text genre to a GenreKey understood by the analysis.
+        normalized_genre: GenreKey
+        g = (genre or "generic").lower().strip()
+        if g in {"afrobeat", "afrobeats"}:
+            normalized_genre = "afrobeat"
+        elif g in {"trap_dancehall", "trap-dancehall"}:
+            normalized_genre = "trap_dancehall"
+        elif g == "dancehall":
+            normalized_genre = "dancehall"
+        elif g in {"hiphop", "hip-hop"}:
+            normalized_genre = "hiphop"
+        elif g == "rap":
+            normalized_genre = "rap"
+        elif g in {"rnb", "r&b"}:
+            normalized_genre = "rnb"
+        elif g == "reggae":
+            normalized_genre = "reggae"
+        else:
+            normalized_genre = "generic"
+
+        # Infer the high-level flow for this call.
+        normalized_flow: FeatureFlow
+        if target == "full_mix" and track_type in {"master", "beat"}:
+            normalized_flow = "mix_master"
+        elif target == "full_mix":
+            normalized_flow = "mastering_only"
+        elif target == "beat" and track_type in {"beat", "master"}:
+            normalized_flow = "beat_only"
+        else:
+            normalized_flow = "mixing_only"
+
+        intelligent_analysis = analyze_track_and_suggest_chain(
+            audio=audio,
+            sr=int(sr),
+            role=normalized_role,
+            genre=normalized_genre,
+            flow=normalized_flow,
+            beat_audio_for_masking=None,
+        )
+    except Exception as exc:  # pragma: no cover - defensive path
+        logger.warning("[DSP] Intelligent mixing analysis failed: %s", exc)
 
     # WORLD-based pitch analysis is only relevant for vocals.
     if track_type == "vocal":
@@ -337,6 +403,11 @@ def process_audio(
         result["lufs"] = lufs_value
     if true_peak_value is not None:
         result["true_peak"] = true_peak_value
+    if intelligent_analysis is not None:
+        # Attach both analysis metrics and the AI-suggested chain
+        # without affecting the actual rendered audio.
+        result["intelligent_analysis"] = intelligent_analysis.get("analysis")
+        result["intelligent_plugin_chain"] = intelligent_analysis.get("plugin_chain")
     if plugin_chain is not None:
         result["plugin_chain"] = plugin_chain
     if target is not None:

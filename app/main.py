@@ -1,12 +1,20 @@
 import json
 from dataclasses import asdict
+from typing import Optional
 
+import soundfile as sf
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.engine import process_audio
 from app.analysis import analyze_audio
 from app.preset_registry import list_presets
+from app.dsp.analysis.intelligent_mixing import (
+    analyze_track_and_suggest_chain,
+    GenreKey,
+    TrackRole,
+    FeatureFlow,
+)
 
 app = FastAPI(title="MixSmvrt DSP Engine")
 
@@ -38,6 +46,101 @@ async def health():
 async def analyze(file: UploadFile = File(...)):
     """Return analysis stats and reference-based preset overrides."""
     return analyze_audio(file)
+
+
+@app.post("/analyze-track")
+async def analyze_track(
+    file: UploadFile = File(...),
+    track_role: str = Form("vocal_lead"),
+    genre: Optional[str] = Form(None),
+    flow: str = Form("mixing_only"),
+    beat_file: Optional[UploadFile] = File(default=None),
+    job_id: Optional[str] = Form(None),
+    track_id: Optional[str] = Form(None),
+):
+    """Intelligent per-track analysis for AI-assisted mixing.
+
+    This endpoint does *not* render audio. It inspects the uploaded
+    track (and optionally a beat reference) and returns:
+    - rich analysis metrics (loudness, spectrum, dynamics, stereo, masking)
+    - a suggested plugin_chain suitable for the Studio UI.
+    """
+
+    # Decode main track
+    try:
+        audio, sr = sf.read(file.file)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail=f"Failed to read audio: {exc}") from exc
+
+    # Optional beat for masking detection
+    beat_audio = None
+    if beat_file is not None:
+        try:
+            beat_audio, _ = sf.read(beat_file.file)
+        except Exception:
+            beat_audio = None
+
+    normalized_role: TrackRole
+    tr = (track_role or "").lower().strip()
+    if tr in {"beat", "drums"}:
+        normalized_role = "beat"
+    elif tr in {"bg", "background", "vocal_bg", "background_vocal"}:
+        normalized_role = "vocal_bg"
+    elif tr in {"adlib", "adlibs", "vocal_adlib"}:
+        normalized_role = "vocal_adlib"
+    else:
+        normalized_role = "vocal_lead"
+
+    normalized_genre: GenreKey
+    g = (genre or "generic").lower().strip()
+    if g in {"afrobeat", "afrobeats"}:
+        normalized_genre = "afrobeat"
+    elif g in {"trap_dancehall", "trap-dancehall"}:
+        normalized_genre = "trap_dancehall"
+    elif g == "dancehall":
+        normalized_genre = "dancehall"
+    elif g in {"hiphop", "hip-hop"}:
+        normalized_genre = "hiphop"
+    elif g == "rap":
+        normalized_genre = "rap"
+    elif g in {"rnb", "r&b"}:
+        normalized_genre = "rnb"
+    elif g == "reggae":
+        normalized_genre = "reggae"
+    else:
+        normalized_genre = "generic"
+
+    normalized_flow: FeatureFlow
+    f = (flow or "mixing_only").lower().strip()
+    if f in {"audio_cleanup", "cleanup"}:
+        normalized_flow = "audio_cleanup"
+    elif f in {"mix_only", "mixing_only", "mix"}:
+        normalized_flow = "mixing_only"
+    elif f in {"mix_master", "mix+master", "mix_and_master"}:
+        normalized_flow = "mix_master"
+    elif f in {"master_only", "mastering_only", "master"}:
+        normalized_flow = "mastering_only"
+    elif f in {"beat_only", "beat"}:
+        normalized_flow = "beat_only"
+    else:
+        normalized_flow = "mixing_only"
+
+    result = analyze_track_and_suggest_chain(
+        audio=audio,
+        sr=int(sr),
+        role=normalized_role,
+        genre=normalized_genre,
+        flow=normalized_flow,
+        beat_audio_for_masking=beat_audio,
+    )
+
+    # Attach job/track identifiers for easier storage in processing_jobs
+    if job_id is not None:
+        result["job_id"] = job_id
+    if track_id is not None:
+        result["track_id"] = track_id
+
+    return result
 
 
 @app.post("/process")
