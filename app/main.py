@@ -235,6 +235,11 @@ async def process(
             response["true_peak"] = output_paths.get("true_peak")
         if "plugin_chain" in output_paths:
             response["plugin_chain"] = output_paths.get("plugin_chain")
+        # Intelligent analysis + suggested plugin chain for the Studio UI.
+        if "intelligent_analysis" in output_paths:
+            response["intelligent_analysis"] = output_paths.get("intelligent_analysis")
+        if "intelligent_plugin_chain" in output_paths:
+            response["intelligent_plugin_chain"] = output_paths.get("intelligent_plugin_chain")
         if "job_id" in output_paths:
             response["job_id"] = output_paths.get("job_id")
         if "track_id" in output_paths:
