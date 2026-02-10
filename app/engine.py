@@ -28,6 +28,7 @@ from app.dsp.analysis.intelligent_mixing import (
     TrackRole,
     FeatureFlow,
 )
+from app.dsp.adaptive.pipeline import build_adaptive_pipeline
 
 
 logger = logging.getLogger(__name__)
@@ -179,12 +180,26 @@ def process_audio(
     analysis_features = None
     pitch_profile = None
     intelligent_analysis: dict | None = None
+    adaptive_config: dict | None = None
 
     try:
         analysis_features = analyze_mono_signal(audio, sr)
         logger.debug("[DSP] Analysis completed: %s", analysis_features)
     except Exception as exc:  # pragma: no cover - defensive path
         logger.warning("[DSP] Analysis failed (Essentia/numpy): %s", exc)
+
+    # Build the high-level adaptive pipeline configuration. This is
+    # pure analysis/decision logic and does not render audio.
+    try:
+        adaptive_config = build_adaptive_pipeline(
+            audio=audio,
+            sr=int(sr),
+            user_tag=track_role or track_type,
+            genre=genre,
+            gender=gender,
+        )
+    except Exception as exc:  # pragma: no cover - defensive path
+        logger.warning("[DSP] Adaptive pipeline build failed: %s", exc)
 
     # High-level intelligent analysis + plugin suggestions for the
     # Studio UI and processing_jobs table. This is non-destructive and
@@ -268,6 +283,23 @@ def process_audio(
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[DSP] Key-aware pitch correction failed: %s", exc)
 
+    # Apply adaptive gain staging as the first transformation before
+    # entering the main processing chains. This keeps the rendered
+    # audio in line with the analysis-driven target levels while
+    # preserving the original raw signal for analysis above.
+    audio_for_processing = audio
+    if adaptive_config:
+        try:
+            gain_db = (
+                adaptive_config.get("gain_staging", {})
+                .get("gain_db")
+            )
+            if isinstance(gain_db, (int, float)) and abs(gain_db) > 1e-3:
+                gain = float(np.power(10.0, float(gain_db) / 20.0))
+                audio_for_processing = (audio_for_processing.astype(np.float32) * gain)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("[DSP] Adaptive gain staging failed: %s", exc)
+
     # If this is a vocal track and a genre or matching preset is provided,
     # route through the dedicated genre-specific vocal chains.
     if track_type == "vocal":
@@ -286,12 +318,12 @@ def process_audio(
         if vocal_processor is not None:
             # Genre-aware, pedalboard-centric vocal chains stay in charge
             # for named presets like trap_dancehall, hiphop, etc.
-            processed = vocal_processor(audio, sr)
+            processed = vocal_processor(audio_for_processing, sr)
         else:
             # Generic vocal path: upgrade to the dynamic Pedalboard chain
             # driven by analysis + WORLD pitch metrics.
             processed = process_with_dynamic_chain(
-                audio=audio,
+                audio=audio_for_processing,
                 sr=sr,
                 preset_key=preset_name,
                 track_type=track_type,
@@ -307,13 +339,13 @@ def process_audio(
             if isinstance(reference_overrides, dict):
                 master_overrides = reference_overrides.get("streaming_master")
 
-            processed = process_beat_or_master(audio, sr, master_overrides)
+            processed = process_beat_or_master(audio_for_processing, sr, master_overrides)
         else:
             # For other non-vocal tracks, use the upgraded dynamic
             # Pedalboard chain, but still allow the backend to hint
             # whether this should be treated as a dedicated beat bus.
             processed = process_with_dynamic_chain(
-                audio=audio,
+                audio=audio_for_processing,
                 sr=sr,
                 preset_key=preset_name,
                 track_type=track_type,
@@ -408,6 +440,8 @@ def process_audio(
         # without affecting the actual rendered audio.
         result["intelligent_analysis"] = intelligent_analysis.get("analysis")
         result["intelligent_plugin_chain"] = intelligent_analysis.get("plugin_chain")
+    if adaptive_config is not None:
+        result["adaptive_config"] = adaptive_config
     if plugin_chain is not None:
         result["plugin_chain"] = plugin_chain
     if target is not None:
