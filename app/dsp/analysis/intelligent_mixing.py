@@ -212,10 +212,19 @@ def analyze_loudness(audio: np.ndarray, sr: int) -> LoudnessAnalysis:
     mono = _ensure_mono(audio)
     duration_sec = mono.shape[0] / float(sr)
 
-    meter = pyln.Meter(sr)  # EBU R128
-    integrated_lufs = float(meter.integrated_loudness(mono))
-    # pyloudnorm Meter does not have short_term_loudness; use integrated as fallback
-    short_term_lufs = integrated_lufs
+    # EBU R128 loudness. Very short clips can raise
+    # "Audio must have length greater than the block size" in pyloudnorm,
+    # so fall back to an RMS-derived estimate instead of failing.
+    try:
+        meter = pyln.Meter(sr)  # EBU R128
+        integrated_lufs = float(meter.integrated_loudness(mono))
+        # pyloudnorm Meter does not have short_term_loudness; use integrated as fallback
+        short_term_lufs = integrated_lufs
+    except Exception:
+        rms_fallback = float(np.sqrt(np.mean(mono ** 2))) if mono.size > 0 else 0.0
+        rms_dbfs_fallback = float(_safe_db(np.array([rms_fallback]))[0])
+        integrated_lufs = rms_dbfs_fallback
+        short_term_lufs = rms_dbfs_fallback
 
     rms = float(np.sqrt(np.mean(mono ** 2)))
     rms_dbfs = float(_safe_db(np.array([rms]))[0])
