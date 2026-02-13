@@ -291,6 +291,30 @@ def process_audio(
     # Core processing is now delegated to the new dsp_engine pipelines.
     audio_for_processing = audio.astype(np.float32)
 
+    # Extract simple BPM estimate if available from adaptive_config.analysis
+    bpm_value: float | None = None
+    if isinstance(adaptive_config, dict):
+        try:
+            analysis_section = adaptive_config.get("analysis") or {}
+            bpm_candidate = analysis_section.get("bpm") or analysis_section.get("tempo")
+            if isinstance(bpm_candidate, (int, float)):
+                bpm_value = float(bpm_candidate)
+        except Exception:  # pragma: no cover - defensive
+            bpm_value = None
+
+    # Normalised role/genre strings for FX adaptivity
+    normalized_role_str: str | None = None
+    if isinstance(adaptive_config, dict):
+        role_val = adaptive_config.get("role")
+        if isinstance(role_val, str):
+            normalized_role_str = role_val
+    if not normalized_role_str:
+        normalized_role_str = track_role or track_type
+
+    normalized_genre_str: str | None = None
+    if genre is not None:
+        normalized_genre_str = genre
+
     try:
         if target == "cleanup" or track_type == "cleanup":
             processed, core_report = engine_audio_cleanup(preset_name or "track", audio_for_processing, sr)
@@ -312,6 +336,9 @@ def process_audio(
                 audio_for_processing,
                 sr,
                 is_vocal=is_vocal_track,
+                role=normalized_role_str,
+                bpm=bpm_value,
+                genre=normalized_genre_str,
             )
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("[DSP] dsp_engine pipeline failed, falling back to legacy chain: %s", exc)
