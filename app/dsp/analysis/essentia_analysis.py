@@ -105,6 +105,14 @@ def analyze_mono_signal(audio: np.ndarray, sr: int) -> Dict[str, float]:
     # Downmix + lightweight resample
     mono, sr_mono = _to_mono_16k(audio, sr)
 
+    # Hard cap analysis length to avoid excessive memory / CPU
+    # usage on long reference files. 60 seconds at 16 kHz is
+    # more than enough for stable statistics.
+    max_duration_sec = 60.0
+    max_samples = int(sr_mono * max_duration_sec)
+    if mono.shape[0] > max_samples:
+        mono = mono[:max_samples]
+
     # Pure numpy fallbacks if Essentia is not available at runtime.
     if not _ESSENTIA_AVAILABLE:
         return _numpy_analysis(mono, sr_mono)
@@ -122,7 +130,12 @@ def analyze_mono_signal(audio: np.ndarray, sr: int) -> Dict[str, float]:
 
         frame_size = 1024
         hop_size = 512
-        for frame in es.FrameGenerator(mono, frame_size=frame_size, hop_size=hop_size, startFromZero=True):  # type: ignore[attr-defined]
+        for frame in es.FrameGenerator(  # type: ignore[attr-defined]
+            mono,
+            frameSize=frame_size,
+            hopSize=hop_size,
+            startFromZero=True,
+        ):
             spec = spectrum(window(frame))
             centroids.append(float(centroid_alg(spec)))
             rms_frame = float(rms_alg(frame))
