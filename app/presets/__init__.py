@@ -204,6 +204,30 @@ def list_presets_for_ui(flow_type: FlowType, genre: str) -> List[Dict[str, str]]
     return results
 
 
+def list_all_presets_for_ui() -> List[Dict[str, str]]:
+    """Return a flat list of all vocal presets for UI consumption.
+
+    Each entry includes ``flow_type``, ``genre``, ``preset_name`` and
+    ``ui_subtitle`` so callers can build user-facing labels and stable
+    identifiers without depending on internal module layout.
+    """
+
+    results: List[Dict[str, str]] = []
+
+    for (flow_type, genre), presets_for_key in _PRESET_INDEX.items():
+        for name, profile in presets_for_key.items():
+            results.append(
+                {
+                    "genre": genre,
+                    "flow_type": flow_type,
+                    "preset_name": name,
+                    "ui_subtitle": profile.ui_subtitle,
+                }
+            )
+
+    return results
+
+
 def get_preset(flow_type: FlowType, genre: str, preset_name: str) -> Optional[VocalPresetProfile]:
     ft = _normalise_flow_type(flow_type)
     g = _normalise_genre(genre)
