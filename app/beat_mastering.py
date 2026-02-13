@@ -137,7 +137,7 @@ def process_beat_or_master(audio: np.ndarray, sr: int, overrides: dict | None = 
     """Beat/master bus preset for more polished tone.
 
     - Gentle low-end clean-up
-    - Subtle mid cut and presence boost
+    - Vocal pocket: subtle midrange dip where leads typically sit
     - Glue-style compression
     - Harmonic saturation
     - Final limiter with streaming headroom
@@ -165,8 +165,11 @@ def process_beat_or_master(audio: np.ndarray, sr: int, overrides: dict | None = 
     plugins = [
         HighpassFilter(cutoff_frequency_hz=30.0),
         LowShelfFilter(cutoff_frequency_hz=120.0, gain_db=-2.5),
+        # Light low-mid cleanup
         PeakFilter(cutoff_frequency_hz=350.0, gain_db=-1.5, q=0.9),
-        PeakFilter(cutoff_frequency_hz=2500.0, gain_db=2.0, q=0.9),
+        # Vocal pocket: gentle dip in the 2–4 kHz presence region so
+        # leads and stacks can sit forward without fighting the beat.
+        PeakFilter(cutoff_frequency_hz=3000.0, gain_db=-1.5, q=0.9),
         HighShelfFilter(cutoff_frequency_hz=10000.0, gain_db=2.0),
         Compressor(threshold_db=base_comp_threshold, ratio=2.0, attack_ms=12.0, release_ms=120.0),
         Saturation(drive_db=4.0),
