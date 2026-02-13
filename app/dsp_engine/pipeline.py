@@ -23,6 +23,7 @@ from .midside import stereo_to_ms, ms_to_stereo, apply_width
 from .saturation import soft_saturation
 from .limiter import TruePeakLimiter
 from .rnnoise_cleaner import RnNoiseCleaner
+from .fx_bus import apply_vocal_fx_buses, FxReport
 
 
 FlowType = Literal["audio_cleanup", "mixing_only", "mix_master", "mastering_only"]
@@ -99,6 +100,9 @@ def process_mixing_only(
   sr: int,
   is_vocal: bool = False,
   beat_sidechain: Optional[np.ndarray] = None,
+  role: Optional[str] = None,
+  bpm: Optional[float] = None,
+  genre: Optional[str] = None,
 ) -> tuple[np.ndarray, ProcessingReport]:
   x = _ensure_stereo(x).astype(np.float32)
   loud_before = measure_loudness(x, sr)
@@ -139,7 +143,28 @@ def process_mixing_only(
   x_bus = mb.process(x_dyn, sr)
   chain.append("multiband_bus_comp")
 
+  # FX buses: reverb and delay for vocals only
+  fx_report: Optional[FxReport] = None
+  if is_vocal:
+    role_str = role or "lead"
+    x_fx, fx_report = apply_vocal_fx_buses(
+      x_bus,
+      sr,
+      role=role_str,
+      bpm=bpm,
+      genre=genre,
+    )
+    x_bus = x_fx
+
   loud_after = measure_loudness(x_bus, sr)
+
+  params: Dict[str, float] = {}
+  if fx_report is not None:
+    fx_dict = fx_report.to_dict()
+    # Merge FX fields into parameter values
+    for k, v in fx_dict.items():
+      # Cast bools to float-compatible or leave as-is; JSON can handle both.
+      params[k] = float(v) if isinstance(v, (int, float)) else v  # type: ignore[assignment]
 
   report = ProcessingReport(
     track_name=track_name,
@@ -161,7 +186,7 @@ def process_mix_master(
   beat_sidechain: Optional[np.ndarray] = None,
   target_lufs: float = -9.0,
 ) -> tuple[np.ndarray, ProcessingReport]:
-  # start from mixing chain
+  # start from mixing chain (includes FX buses for vocals)
   mix, mix_report = process_mixing_only(track_name, x, sr, is_vocal=is_vocal, beat_sidechain=beat_sidechain)
 
   # subtle saturation
