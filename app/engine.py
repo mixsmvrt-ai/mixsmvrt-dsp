@@ -28,6 +28,11 @@ from app.dsp.analysis.intelligent_mixing import (
     FeatureFlow,
 )
 from app.dsp.adaptive.pipeline import build_adaptive_pipeline
+from app.presets import (
+    get_preset as get_vocal_preset,
+    apply_adaptive_tweaks as tweak_vocal_preset,
+    list_presets_for_ui as list_vocal_presets,
+)
 from app.dsp_engine import (
     process_audio_cleanup as engine_audio_cleanup,
     process_mixing_only as engine_mixing_only,
@@ -304,6 +309,7 @@ def process_audio(
     job_id: str | None = None,
     track_id: str | None = None,
     track_role: str | None = None,
+    vocal_preset: str | None = None,
 ) -> dict:
     """Run a simple offline DSP chain over the uploaded audio.
 
@@ -431,9 +437,11 @@ def process_audio(
 
     # Extract simple BPM estimate if available from adaptive_config.analysis
     bpm_value: float | None = None
+    adaptive_analysis: dict | None = None
     if isinstance(adaptive_config, dict):
         try:
             analysis_section = adaptive_config.get("analysis") or {}
+            adaptive_analysis = analysis_section if isinstance(analysis_section, dict) else None
             bpm_candidate = analysis_section.get("bpm") or analysis_section.get("tempo")
             if isinstance(bpm_candidate, (int, float)):
                 bpm_value = float(bpm_candidate)
@@ -453,6 +461,96 @@ def process_audio(
     if genre is not None:
         normalized_genre_str = genre
 
+    # ---------------------------------
+    # 1b) VOCAL PRESET SELECTION (genre + vibe)
+    # ---------------------------------
+    vocal_eq_preset: dict | None = None
+    vocal_dyn_eq_preset: dict | None = None
+    vocal_deesser_preset: dict | None = None
+    vocal_saturation_preset: dict | None = None
+    bus_comp_preset: dict | None = None
+    master_preset: dict | None = None
+    mix_master_target_lufs: float | None = None
+
+    try:
+        flow_for_presets: str | None = None
+        preset_genre: str | None = normalized_genre_str or genre
+        preset_name_key: str | None = None
+
+        # If the frontend provided a concrete vocal_preset id, parse it.
+        if vocal_preset:
+            parts = vocal_preset.split(":", 2)
+            if len(parts) == 3:
+                flow_for_presets, preset_genre, preset_name_key = parts
+            else:
+                preset_name_key = vocal_preset
+
+        # Derive a coarse flow type for the vocal preset system when not
+        # explicitly specified by the frontend.
+        if not flow_for_presets:
+            if target == "full_mix" and track_type in {"master", "beat"}:
+                flow_for_presets = "mixing_mastering"
+            elif track_type == "vocal" and (target is None or target == "vocal"):
+                flow_for_presets = "mixing_only"
+
+        base_profile = None
+        if flow_for_presets and preset_genre:
+            if preset_name_key:
+                base_profile = get_vocal_preset(flow_for_presets, preset_genre, preset_name_key)
+            if base_profile is None:
+                # Default: pick the first preset for this (flow, genre).
+                candidates = list_vocal_presets(flow_for_presets, preset_genre)
+                if candidates:
+                    first_name = candidates[0]["preset_name"]
+                    base_profile = get_vocal_preset(flow_for_presets, preset_genre, first_name)
+
+        if base_profile is not None:
+            # Build a compact analysis dict for adaptive tweaks.
+            analysis_for_preset: dict[str, object] = {}
+            bands: dict[str, float] = {}
+
+            if adaptive_analysis is not None:
+                bands["high_db"] = float(adaptive_analysis.get("band_high_db", 0.0))  # type: ignore[arg-type]
+                sib = adaptive_analysis.get("band_sibilance_db", bands["high_db"])  # type: ignore[arg-type]
+                bands["sibilance_db"] = float(sib)
+                analysis_for_preset["dynamic_range_db"] = float(
+                    adaptive_analysis.get("dynamic_range_db", 10.0)  # type: ignore[arg-type]
+                )
+                analysis_for_preset["rms_db"] = float(
+                    adaptive_analysis.get("rms_db", -18.0)  # type: ignore[arg-type]
+                )
+
+            analysis_for_preset["bands"] = bands
+
+            if pitch_profile and isinstance(pitch_profile, dict):
+                median_f0 = pitch_profile.get("median_f0_hz")
+                if isinstance(median_f0, (int, float)):
+                    analysis_for_preset["median_f0_hz"] = float(median_f0)
+
+            tweaked = tweak_vocal_preset(
+                base_profile,
+                analysis=analysis_for_preset,
+                tempo_bpm=bpm_value,
+            )
+
+            vocal_eq_preset = dict(tweaked.eq_profile or {})
+            vocal_dyn_eq_preset = dict(tweaked.dynamic_eq_profile or {})
+            vocal_deesser_preset = dict(tweaked.deesser_profile or {})
+            vocal_saturation_preset = dict(tweaked.saturation_profile or {})
+            bus_comp_preset = dict((tweaked.bus_processing or {}).get("bus_comp", {}))
+
+            master_proc = tweaked.master_processing or {}
+            if isinstance(master_proc, dict):
+                if "target_lufs" in master_proc:
+                    try:
+                        mix_master_target_lufs = float(master_proc.get("target_lufs"))
+                    except Exception:  # pragma: no cover - defensive
+                        mix_master_target_lufs = None
+                master_preset = dict(master_proc)
+
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("[DSP] Vocal preset selection failed: %s", exc)
+
     try:
         if target == "cleanup" or track_type == "cleanup":
             processed, core_report = engine_audio_cleanup(preset_name or "track", audio_for_processing, sr)
@@ -463,6 +561,10 @@ def process_audio(
                 audio_for_processing,
                 sr,
                 is_vocal=False,
+                target_lufs=mix_master_target_lufs or -9.0,
+                preset_saturation=vocal_saturation_preset,
+                preset_bus_comp=bus_comp_preset,
+                preset_master=master_preset,
             )
         elif target == "master_only" or track_type == "master":
             processed, core_report = engine_mastering_only(preset_name or "master_bus", audio_for_processing, sr)
@@ -474,9 +576,17 @@ def process_audio(
                 audio_for_processing,
                 sr,
                 is_vocal=is_vocal_track,
+                beat_sidechain=None,
                 role=normalized_role_str,
                 bpm=bpm_value,
                 genre=normalized_genre_str,
+                preset_eq=vocal_eq_preset if is_vocal_track else None,
+                preset_dyn_eq=vocal_dyn_eq_preset if is_vocal_track else None,
+                preset_deesser=vocal_deesser_preset if is_vocal_track else None,
+                preset_saturation=vocal_saturation_preset if is_vocal_track else None,
+                preset_bus_comp=bus_comp_preset,
+                preset_reverb=tweaked.reverb_profile if base_profile is not None and is_vocal_track else None,
+                preset_delay=tweaked.delay_profile if base_profile is not None and is_vocal_track else None,
             )
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("[DSP] dsp_engine pipeline failed, falling back to legacy chain: %s", exc)

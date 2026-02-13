@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.engine import process_audio
 from app.analysis import analyze_audio
 from app.preset_registry import list_presets
+from app.presets import list_all_presets_for_ui
 from app.dsp.analysis.intelligent_mixing import (
     analyze_track_and_suggest_chain,
     GenreKey,
@@ -162,6 +163,7 @@ async def process(
     job_id: str | None = Form(None),
     track_id: str | None = Form(None),
     track_role: str | None = Form(None),
+    vocal_preset: str | None = Form(None),
 ):
     """Process an uploaded audio file with the given track type + preset.
 
@@ -202,6 +204,7 @@ async def process(
             job_id=job_id,
             track_id=track_id,
             track_role=track_role,
+            vocal_preset=vocal_preset,
         )
     except MemoryError as exc:  # pragma: no cover - defensive
         # Explicitly surface out-of-memory conditions so orchestrators can
@@ -302,3 +305,43 @@ async def list_available_presets(kind: str | None = Query(default=None)):
     return {
         "presets": [asdict(p) for p in presets],
     }
+
+
+@app.get("/vocal-presets")
+async def list_vocal_presets(flow: str | None = Query(default=None), genre: str | None = Query(default=None)):
+    """Expose the full catalog of vocal tone presets.
+
+    Returns entries that can be used directly by the studio UI to
+    populate a "vocal tone" selector. Each preset is given a stable
+    ``id`` of the form ``"{flow_type}:{genre}:{preset_name}"`` that
+    can be sent back as the ``vocal_preset`` form field to /process.
+    """
+
+    if flow and genre:
+        rows = list_all_presets_for_ui()
+        filtered = [
+            r
+            for r in rows
+            if r.get("flow_type") == flow and r.get("genre") == genre
+        ]
+    else:
+        filtered = list_all_presets_for_ui()
+
+    presets = []
+    for row in filtered:
+        ft = row.get("flow_type") or "mixing_only"
+        g = row.get("genre") or "generic"
+        name = row.get("preset_name") or ""
+        if not name:
+            continue
+        presets.append(
+            {
+                "id": f"{ft}:{g}:{name}",
+                "flow_type": ft,
+                "genre": g,
+                "preset_name": name,
+                "ui_subtitle": row.get("ui_subtitle", ""),
+            }
+        )
+
+    return {"presets": presets}
