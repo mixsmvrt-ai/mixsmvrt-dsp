@@ -151,6 +151,144 @@ def _apply_beat_safe_overrides(preset: dict) -> dict:
     return safe
 
 
+def _build_virtual_tracks(
+    *,
+    track_type: str,
+    track_role: str | None,
+    core_report,
+) -> list[dict]:
+    """Describe internal buses/FX as DAW-style virtual tracks for the Studio UI.
+
+    This is metadata only: no audio routing happens here. The goal is to
+    let the frontend render vocal bus, mix bus, and FX buses (reverb,
+    delay) with visible plugin chains and routing similar to a DAW.
+    """
+
+    if core_report is None:
+        return []
+
+    params = getattr(core_report, "parameter_values", {}) or {}
+    chain = list(getattr(core_report, "processing_chain", []) or [])
+
+    virtual_tracks: list[dict] = []
+
+    # For now we only expose detailed buses for vocal-style tracks.
+    role_key = (track_role or track_type or "").lower()
+    is_vocal_like = track_type == "vocal" or any(k in role_key for k in ["vocal", "lead", "bg", "adlib"])
+    if not is_vocal_like:
+        return []
+
+    main_track_id = "track_main"
+
+    # Vocal bus: represents the core vocal chain inside dsp_engine.
+    vocal_bus_id = "vocal_bus"
+    vocal_plugins = []
+    for step in chain:
+        # Map each processing step to a conceptual plugin entry for the UI.
+        vocal_plugins.append({
+            "plugin": f"engine::{step}",
+            "params": {},
+        })
+
+    virtual_tracks.append(
+        {
+            "id": vocal_bus_id,
+            "name": "Vocal Bus",
+            "type": "bus",
+            "role": "vocal",
+            "source_tracks": [main_track_id],
+            "output_to": "mix_bus",
+            "plugins": vocal_plugins,
+            "sends": [],
+        }
+    )
+
+    # FX buses: built from FX parameter values when present.
+    reverb_enabled = bool(params.get("reverb_enabled", 0.0))
+    delay_enabled = bool(params.get("delay_enabled", 0.0))
+
+    if reverb_enabled:
+        virtual_tracks.append(
+            {
+                "id": "reverb_bus",
+                "name": "Reverb Bus",
+                "type": "fx_bus",
+                "fx_type": "reverb",
+                "output_to": "mix_bus",
+                "plugins": [
+                    {
+                        "plugin": "engine::algorithmic_reverb",
+                        "params": {
+                            "decay_s": params.get("reverb_decay"),
+                            "wet": params.get("reverb_wet"),
+                        },
+                    }
+                ],
+                "receives_from": [
+                    {
+                        "source": vocal_bus_id,
+                        "send_type": "post-fader",
+                        "send_level": params.get("reverb_wet"),
+                    }
+                ],
+            }
+        )
+
+    if delay_enabled:
+        virtual_tracks.append(
+            {
+                "id": "delay_bus",
+                "name": "Delay Bus",
+                "type": "fx_bus",
+                "fx_type": "delay",
+                "output_to": "mix_bus",
+                "plugins": [
+                    {
+                        "plugin": "engine::stereo_delay",
+                        "params": {
+                            "time_ms": params.get("delay_time_ms"),
+                            "feedback": params.get("delay_feedback"),
+                        },
+                    }
+                ],
+                "receives_from": [
+                    {
+                        "source": vocal_bus_id,
+                        "send_type": "post-fader",
+                        "send_level": params.get("delay_feedback"),
+                    }
+                ],
+            }
+        )
+
+    # Mix bus: conceptual bus that all vocal/FX buses feed into. This lets the
+    # Studio show a top-level bus similar to a DAW mix bus.
+    mix_sources = [vocal_bus_id]
+    if reverb_enabled:
+        mix_sources.append("reverb_bus")
+    if delay_enabled:
+        mix_sources.append("delay_bus")
+
+    virtual_tracks.append(
+        {
+            "id": "mix_bus",
+            "name": "Mix Bus",
+            "type": "mix_bus",
+            "role": "mix",
+            "source_tracks": mix_sources,
+            "output_to": "master_out",
+            "plugins": [
+                {"plugin": "engine::multiband_bus_comp", "params": {}},
+                {"plugin": "engine::limiter", "params": {}},
+            ],
+        }
+    )
+
+    # The main audio track itself is implied; the Studio can treat `track_main`
+    # as the user track processed by this engine call.
+    return virtual_tracks
+
+
 def process_audio(
     file,
     track_type: str,
@@ -424,6 +562,14 @@ def process_audio(
             "loudness_after": core_report.loudness_after,
             "true_peak_after": core_report.true_peak_after,
         }
+        # Expose internal buses/FX as DAW-style virtual tracks for the Studio UI.
+        virtual_tracks = _build_virtual_tracks(
+            track_type=track_type,
+            track_role=track_role,
+            core_report=core_report,
+        )
+        if virtual_tracks:
+            result["virtual_tracks"] = virtual_tracks
     if intelligent_analysis is not None:
         # Attach both analysis metrics and the AI-suggested chain
         # without affecting the actual rendered audio.
