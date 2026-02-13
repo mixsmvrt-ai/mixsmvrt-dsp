@@ -6,7 +6,6 @@ import numpy as np
 import soundfile as sf
 
 from app.beat_mastering import process_beat_or_master
-from app.processors.loudness import measure_loudness
 from app.storage import upload_file_to_s3
 from app.throw_fx import apply_throw_fx_to_vocal
 from app.vocal_presets.tuning import apply_pitch_correction
@@ -29,6 +28,12 @@ from app.dsp.analysis.intelligent_mixing import (
     FeatureFlow,
 )
 from app.dsp.adaptive.pipeline import build_adaptive_pipeline
+from app.dsp_engine import (
+    process_audio_cleanup as engine_audio_cleanup,
+    process_mixing_only as engine_mixing_only,
+    process_mix_master as engine_mix_master,
+    process_mastering_only as engine_mastering_only,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -283,76 +288,35 @@ def process_audio(
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("[DSP] Key-aware pitch correction failed: %s", exc)
 
-    # Apply adaptive gain staging as the first transformation before
-    # entering the main processing chains. This keeps the rendered
-    # audio in line with the analysis-driven target levels while
-    # preserving the original raw signal for analysis above.
-    audio_for_processing = audio
-    if adaptive_config:
-        try:
-            gain_db = (
-                adaptive_config.get("gain_staging", {})
-                .get("gain_db")
+    # Core processing is now delegated to the new dsp_engine pipelines.
+    audio_for_processing = audio.astype(np.float32)
+
+    try:
+        if target == "cleanup" or track_type == "cleanup":
+            processed, core_report = engine_audio_cleanup(preset_name or "track", audio_for_processing, sr)
+        elif target == "full_mix" and track_type in {"master", "beat"}:
+            # mix + master flow on a stereo bus
+            processed, core_report = engine_mix_master(
+                preset_name or "mix_master_bus",
+                audio_for_processing,
+                sr,
+                is_vocal=False,
             )
-            if isinstance(gain_db, (int, float)) and abs(gain_db) > 1e-3:
-                gain = float(np.power(10.0, float(gain_db) / 20.0))
-                audio_for_processing = (audio_for_processing.astype(np.float32) * gain)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("[DSP] Adaptive gain staging failed: %s", exc)
-
-    # If this is a vocal track and a genre or matching preset is provided,
-    # route through the dedicated genre-specific vocal chains.
-    if track_type == "vocal":
-        base_key = (genre or preset_name).lower()
-        gender_key = (gender or "").lower().strip()
-
-        vocal_processor = None
-        if gender_key:
-            # Prefer explicit gender-specific variant if available, e.g. "dancehall_male".
-            combined = f"{base_key}_{gender_key}"
-            vocal_processor = VOCAL_GENRE_PROCESSORS.get(combined)
-
-        if vocal_processor is None:
-            # Fallback to gender-agnostic preset, including bg/adlib variants.
-            vocal_processor = VOCAL_GENRE_PROCESSORS.get(base_key)
-        if vocal_processor is not None:
-            # Genre-aware, pedalboard-centric vocal chains stay in charge
-            # for named presets like trap_dancehall, hiphop, etc.
-            processed = vocal_processor(audio_for_processing, sr)
+        elif target == "master_only" or track_type == "master":
+            processed, core_report = engine_mastering_only(preset_name or "master_bus", audio_for_processing, sr)
         else:
-            # Generic vocal path: upgrade to the dynamic Pedalboard chain
-            # driven by analysis + WORLD pitch metrics.
-            processed = process_with_dynamic_chain(
-                audio=audio_for_processing,
-                sr=sr,
-                preset_key=preset_name,
-                track_type=track_type,
-                analysis=analysis_features or {},
-                pitch_info=pitch_profile or {},
-                genre=genre,
+            # default: mixing_only per-track processing
+            is_vocal_track = track_type == "vocal"
+            processed, core_report = engine_mixing_only(
+                preset_name or "track",
+                audio_for_processing,
+                sr,
+                is_vocal=is_vocal_track,
             )
-    else:
-        # Non‑vocal tracks: use a dedicated pedalboard-based bus chain for
-        # beats/masters, and fall back to the original stub chain for others.
-        if track_type in {"beat", "master"}:
-            master_overrides = None
-            if isinstance(reference_overrides, dict):
-                master_overrides = reference_overrides.get("streaming_master")
-
-            processed = process_beat_or_master(audio_for_processing, sr, master_overrides)
-        else:
-            # For other non-vocal tracks, use the upgraded dynamic
-            # Pedalboard chain, but still allow the backend to hint
-            # whether this should be treated as a dedicated beat bus.
-            processed = process_with_dynamic_chain(
-                audio=audio_for_processing,
-                sr=sr,
-                preset_key=preset_name,
-                track_type=track_type,
-                analysis=analysis_features or {},
-                pitch_info=None,
-                genre=genre,
-            )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("[DSP] dsp_engine pipeline failed, falling back to legacy chain: %s", exc)
+        processed = audio_for_processing
+        core_report = None
 
     # ---------------------------------
     # 1c) SAFETY LAYER (sanity & peak guard)
@@ -380,20 +344,9 @@ def process_audio(
     true_peak_value: float | None = None
 
     try:
-        if processed.size:
-            # Collapse to mono for integrated loudness while keeping
-            # stereo imaging intact for rendering.
-            if processed.ndim == 1:
-                mono_for_loudness = processed.astype(np.float32)
-            else:
-                # Detect channels-first vs channels-last layout
-                if processed.shape[0] <= processed.shape[1]:
-                    mono_for_loudness = processed.mean(axis=0).astype(np.float32)
-                else:
-                    mono_for_loudness = processed.mean(axis=1).astype(np.float32)
-
-            lufs_value = float(measure_loudness(mono_for_loudness, sr))
-            true_peak_value = float(np.max(np.abs(processed.astype(np.float32))))
+        if processed.size and core_report is not None:
+            lufs_value = core_report.loudness_after
+            true_peak_value = core_report.true_peak_after
     except Exception as exc:  # pragma: no cover - defensive path
         logger.warning("[DSP] Loudness/peak measurement failed: %s", exc)
 
@@ -435,6 +388,15 @@ def process_audio(
         result["lufs"] = lufs_value
     if true_peak_value is not None:
         result["true_peak"] = true_peak_value
+    if core_report is not None:
+        result["processing_report"] = {
+            "track_name": core_report.track_name,
+            "processing_chain": core_report.processing_chain,
+            "parameter_values": core_report.parameter_values,
+            "loudness_before": core_report.loudness_before,
+            "loudness_after": core_report.loudness_after,
+            "true_peak_after": core_report.true_peak_after,
+        }
     if intelligent_analysis is not None:
         # Attach both analysis metrics and the AI-suggested chain
         # without affecting the actual rendered audio.
