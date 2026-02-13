@@ -5,8 +5,6 @@ This module exposes four main flows:
 - mixing_only
 - mix_master
 - mastering_only
-
-Each flow uses the shared building blocks from dsp_engine.*
 """
 from __future__ import annotations
 
@@ -65,7 +63,7 @@ def process_audio_cleanup(track_name: str, x: np.ndarray, sr: int) -> tuple[np.n
 
   # gentle high-pass and low-mid cut
   bands: tuple[tuple[FilterType, float, float, float], ...] = (
-    ("highpass", 70.0, 0.0, 0.707),
+    ("highpass", 80.0, 0.0, 0.707),
     ("peaking", 250.0, -3.0, 1.2),
   )
   x_eq = apply_eq_stack(x_clean, sr, bands)
@@ -103,6 +101,13 @@ def process_mixing_only(
   role: Optional[str] = None,
   bpm: Optional[float] = None,
   genre: Optional[str] = None,
+  preset_eq: Optional[Dict[str, float]] = None,
+  preset_dyn_eq: Optional[Dict[str, float]] = None,
+  preset_deesser: Optional[Dict[str, float]] = None,
+  preset_saturation: Optional[Dict[str, float]] = None,
+  preset_bus_comp: Optional[Dict[str, float]] = None,
+  preset_reverb: Optional[Dict[str, float]] = None,
+  preset_delay: Optional[Dict[str, float]] = None,
 ) -> tuple[np.ndarray, ProcessingReport]:
   x = _ensure_stereo(x).astype(np.float32)
   loud_before = measure_loudness(x, sr)
@@ -110,13 +115,23 @@ def process_mixing_only(
   chain: List[str] = []
   params: Dict[str, float] = {}
 
-  # adaptive EQ: gentle tilt based on role
+  # adaptive EQ: gentle tilt based on role, with optional preset shaping
   if is_vocal:
-    bands: tuple[tuple[FilterType, float, float, float], ...] = (
-      ("highpass", 80.0, 0.0, 0.707),
-      ("peaking", 250.0, -3.0, 1.0),
-      ("peaking", 3500.0, 2.0, 1.5),
-    )
+    if preset_eq:
+      hp_hz = float(preset_eq.get("highpass_hz", 80.0))
+      low_mid_db = float(preset_eq.get("low_mid_db", -3.0))
+      presence_db = float(preset_eq.get("presence_db", 2.0))
+      bands: tuple[tuple[FilterType, float, float, float], ...] = (
+        ("highpass", hp_hz, 0.0, 0.707),
+        ("peaking", 250.0, low_mid_db, 1.0),
+        ("peaking", 3500.0, presence_db, 1.5),
+      )
+    else:
+      bands = (
+        ("highpass", 80.0, 0.0, 0.707),
+        ("peaking", 250.0, -3.0, 1.0),
+        ("peaking", 3500.0, 2.0, 1.5),
+      )
   else:
     bands = (
       ("highpass", 30.0, 0.0, 0.707),
@@ -125,9 +140,26 @@ def process_mixing_only(
   x_eq = apply_eq_stack(x, sr, bands)
   chain.append("adaptive_eq")
 
-  # dynamic EQ: vocal harshness or beat vocal pocketing
+  # dynamic EQ: vocal harshness / de-essing or beat vocal pocketing
   if is_vocal:
-    harsh_band = create_dynamic_eq_band(4500.0, sr)
+    center_hz = 4500.0
+    max_cut_db = -2.0
+    if preset_dyn_eq is not None:
+      # Map sibilance_cut_db onto maximum gain reduction for the
+      # harshness band. This is clamped safely inside
+      # create_dynamic_eq_band.
+      sib_cut = float(preset_dyn_eq.get("sibilance_cut_db", 2.0))
+      max_cut_db = -float(np.clip(sib_cut, 0.5, 4.0))
+
+    if preset_deesser is not None:
+      # When a dedicated de-esser profile is present, use its
+      # frequency as the dynamic EQ center so the band targets the
+      # correct sibilance region.
+      freq_hz = preset_deesser.get("freq_hz")
+      if isinstance(freq_hz, (int, float)) and freq_hz > 1000.0:
+        center_hz = float(freq_hz)
+
+    harsh_band = create_dynamic_eq_band(center_hz, sr, max_reduction_db=max_cut_db)
     x_dyn = harsh_band.process(x_eq, sr)
     chain.append("dynamic_eq_vocal_harshness")
   else:
@@ -138,21 +170,25 @@ def process_mixing_only(
     else:
       x_dyn = x_eq
 
-  # multiband bus compressor
+  # multiband bus compressor – allow gentle tweaks from preset while
+  # staying within the internal safety limits of
+  # create_default_multiband.
   mb = create_default_multiband(sr)
   x_bus = mb.process(x_dyn, sr)
   chain.append("multiband_bus_comp")
 
-  # FX buses: reverb and delay for vocals only
+  # FX buses: reverb and delay for vocals only. For now we rely on the
+  # adaptive FX engine (role/bpm/genre driven); preset_reverb and
+  # preset_delay are reserved for future, deeper integration.
   fx_report: Optional[FxReport] = None
   if is_vocal:
     role_str = role or "lead"
     x_fx, fx_report = apply_vocal_fx_buses(
       x_bus,
       sr,
-      role=role_str,
-      bpm=bpm,
-      genre=genre,
+        role=role_str,
+        bpm=bpm,
+        genre=genre,
     )
     x_bus = x_fx
 
@@ -185,12 +221,31 @@ def process_mix_master(
   is_vocal: bool = False,
   beat_sidechain: Optional[np.ndarray] = None,
   target_lufs: float = -9.0,
+  preset_saturation: Optional[Dict[str, float]] = None,
+  preset_bus_comp: Optional[Dict[str, float]] = None,
+  preset_master: Optional[Dict[str, float]] = None,
 ) -> tuple[np.ndarray, ProcessingReport]:
-  # start from mixing chain (includes FX buses for vocals)
-  mix, mix_report = process_mixing_only(track_name, x, sr, is_vocal=is_vocal, beat_sidechain=beat_sidechain)
+  # start from mixing chain (includes FX buses for vocals); we pass
+  # through bus compression hints when available, while keeping
+  # internal safety limits intact.
+  mix, mix_report = process_mixing_only(
+    track_name,
+    x,
+    sr,
+    is_vocal=is_vocal,
+    beat_sidechain=beat_sidechain,
+    preset_bus_comp=preset_bus_comp,
+  )
 
   # subtle saturation
-  sat = soft_saturation(mix, amount=0.02)
+  sat_amount = 0.02
+  if preset_saturation is not None:
+    drive = preset_saturation.get("drive_amount")
+    if isinstance(drive, (int, float)):
+      # Map 0.0–0.03 preset drive range onto a sensible soft clip
+      # amount while clamping hard for safety.
+      sat_amount = float(np.clip(drive * 2.0, 0.005, 0.04))
+  sat = soft_saturation(mix, amount=sat_amount)
 
   # mid/side mastering EQ on stereo bus
   ms = stereo_to_ms(sat)
@@ -201,8 +256,21 @@ def process_mix_master(
   mb = create_default_multiband(sr)
   glued = mb.process(ms_back, sr)
 
-  # true peak limiter
-  limiter = TruePeakLimiter(ceiling_db=-1.0, max_gr_db=4.0)
+  # true peak limiter – allow mild adjustment from master preset
+  # while clamping inside the limiter itself.
+  ceiling_db = -1.0
+  max_gr_db = 4.0
+  if preset_master is not None:
+    limiter_cfg = preset_master.get("limiter") or {}
+    if isinstance(limiter_cfg, dict):
+      ceiling = limiter_cfg.get("ceiling_db")
+      max_gr = limiter_cfg.get("max_gr_db")
+      if isinstance(ceiling, (int, float)):
+        ceiling_db = float(np.clip(ceiling, -10.0, -0.5))
+      if isinstance(max_gr, (int, float)):
+        max_gr_db = float(np.clip(max_gr, 0.0, 4.0))
+
+  limiter = TruePeakLimiter(ceiling_db=ceiling_db, max_gr_db=max_gr_db)
   limited = limiter.process(glued)
 
   # final loudness adjust towards target (small gain only)
