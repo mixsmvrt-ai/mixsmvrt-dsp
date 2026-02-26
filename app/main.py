@@ -3,6 +3,7 @@ from dataclasses import asdict
 from typing import Optional, Any, Dict
 
 import logging
+import os
 import soundfile as sf
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,9 +19,37 @@ from app.dsp.analysis.intelligent_mixing import (
     FeatureFlow,
 )
 
+from app.dsp.parameter_model import ParameterPredictor
+from app.dsp.adaptive_engine import AdaptiveSessionEngine
+from app.dsp.process_pipeline import process_session as process_session_pipeline
+
 logger = logging.getLogger("mixsmvrt_dsp")
 
 app = FastAPI(title="MixSmvrt DSP Engine")
+
+
+@app.on_event("startup")
+def _startup_load_ai_model() -> None:
+    """Preload the LightGBM parameter model once per server process.
+
+    This is best-effort so existing single-track endpoints keep working
+    even if the session model file isn't present in dev.
+    """
+
+    model_path = os.getenv("AI_MODEL_PATH", "models/mix_model.txt")
+    require = os.getenv("AI_REQUIRE_MODEL", "false").lower() in {"1", "true", "yes", "on"}
+    try:
+        predictor = ParameterPredictor(model_path=model_path)
+        app.state.parameter_predictor = predictor
+        app.state.session_engine = AdaptiveSessionEngine(predictor)
+        logger.info("[AI_MIX] Loaded LightGBM model from %s", model_path)
+    except Exception as exc:
+        app.state.parameter_predictor = None
+        app.state.session_engine = None
+        if require:
+            logger.exception("[AI_MIX] Model preload failed and AI_REQUIRE_MODEL=true: %s", exc)
+            raise
+        logger.warning("[AI_MIX] Model preload skipped/failed (%s): %s", model_path, exc)
 
 # Allow the Vercel studio and local development to call this DSP service
 app.add_middleware(
@@ -284,6 +313,73 @@ async def process(
             response["track_role"] = output_paths.get("track_role")
 
     return response
+
+
+@app.post("/process-session")
+async def process_session(
+    files: list[UploadFile] = File(...),
+    genre: str = Form("other"),
+    track_ids: str | None = Form(None),
+):
+    """Process a multi-track session with the adaptive AI mix engine.
+
+    Inputs:
+    - `files`: multiple audio files (stems)
+    - `track_ids`: optional JSON array or comma-separated ids matching `files`
+    - `genre`: genre string for the session vector
+
+    Output:
+    - S3 URL (or local path fallback) to the rendered WAV.
+    """
+
+    engine = getattr(app.state, "session_engine", None)
+    if engine is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "AI_MODEL_NOT_AVAILABLE",
+                "message": "Session AI mix model is not loaded. Set AI_MODEL_PATH and deploy the model file.",
+            },
+        )
+
+    ids: list[str] | None = None
+    if track_ids:
+        # Accept JSON array or comma-separated
+        raw = track_ids.strip()
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list) and all(isinstance(x, str) for x in parsed):
+                ids = [str(x) for x in parsed]
+        except Exception:
+            ids = [s.strip() for s in raw.split(",") if s.strip()]
+
+    if ids is not None and len(ids) != len(files):
+        raise HTTPException(status_code=400, detail="track_ids must match number of files")
+
+    track_audio_map: dict[str, tuple[Any, int]] = {}
+    try:
+        for i, f in enumerate(files):
+            try:
+                audio, sr = sf.read(f.file)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Failed to read audio '{f.filename}': {exc}") from exc
+
+            track_id = (ids[i] if ids is not None else None) or (f.filename or f"track_{i}")
+            track_audio_map[str(track_id)] = (audio, int(sr))
+    finally:
+        for f in files:
+            try:
+                f.file.close()
+            except Exception:
+                pass
+
+    try:
+        return process_session_pipeline(track_audio_map, genre=genre, engine=engine)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("[AI_MIX] Session processing failed: %s", exc)
+        raise HTTPException(status_code=500, detail={"error": "AI_SESSION_PROCESSING_FAILED", "message": str(exc)}) from exc
 
 
 @app.get("/presets")
